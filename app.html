@@ -772,7 +772,7 @@ const LIVE_PLAYER = !!(LIVE_SITE && LIVE_SITE.role === 'player');
 if (LIVE_SITE) { document.body.classList.add('live'); const eb = document.getElementById('eyebrow'); if (eb) eb.textContent = LIVE_SITE.role === 'player' ? 'Your throwing program' : 'Pitcher workload'; } if (LIVE_PLAYER) document.body.classList.add('live-player');
 let PITCHERS = DEFAULT_PITCHERS; try { const s = JSON.parse(localStorage.getItem('wl-pitchers') || 'null'); if (Array.isArray(s) && s.length) PITCHERS = s; } catch (e) {}
 let PITCHER = 'will'; try { PITCHER = localStorage.getItem('wl-pitcher') || 'will'; } catch (e) {}
-if (LIVE_SITE) { PITCHERS = LIVE_SITE.pitchers.map(x => ({id: x.id, name: x.name, master: x.id})); PITCHER = LIVE_SITE.pitcher; }
+if (LIVE_SITE) { PITCHERS = LIVE_SITE.pitchers.map(x => ({id: x.id, name: x.name, master: x.id, test: !!x.test})); PITCHER = LIVE_SITE.pitcher; }
 if (!PITCHERS.some(x => x.id === PITCHER)) PITCHER = PITCHERS[0].id;
 const IS_TEST = LIVE_SITE ? !(D.throws && D.throws.length) : PITCHER !== 'will';
 let PITCHER_NAME = (PITCHERS.find(x => x.id === PITCHER) || DEFAULT_PITCHERS[0]).name;
@@ -3481,7 +3481,12 @@ for (const [btn, box, label] of [['ctrls-toggle', '.top .ctrls', 'Settings'], ['
 function renderPitcherSelect() {
   const ps = document.getElementById('pitcher'); if (!ps) return;
   const tag = x => x.id === 'will' ? ' · from the sheet' : x.id === 'test1' || /^test/.test(x.id) ? ' · test' : ' · no data yet';
-  ps.innerHTML = PITCHERS.map(x => `<option value="${esc(x.id)}" ${x.id === PITCHER ? 'selected' : ''}>${esc(x.name)}${tag(x)}</option>`).join('') + (LIVE_SITE ? '' : '<option value="__add">+ Add a test pitcher…</option>');
+  // alphabetical by last name ("De los Santos" sorts under D); test pitchers last
+  const last = n => { const t = String(n || '').replace(/,?\s+(jr\.?|sr\.?|ii|iii|iv)$/i, '').trim().split(/\s+/);
+    const i = t.findIndex((w, k) => k > 0 && /^(de|del|della|da|di|van|von|la|le|st\.?)$/i.test(w)); return (i > 0 ? t.slice(i) : t.slice(-1)).join(' '); };
+  const isTest = x => x.id === 'test1' || /^test/.test(x.id) || x.test;
+  const list = PITCHERS.slice().sort((a, b) => (isTest(a) - isTest(b)) || last(a.name).localeCompare(last(b.name), undefined, {sensitivity: 'base'}) || String(a.name).localeCompare(String(b.name)));
+  ps.innerHTML = list.map(x => `<option value="${esc(x.id)}" ${x.id === PITCHER ? 'selected' : ''}>${esc(x.name)}${tag(x)}</option>`).join('') + (LIVE_SITE ? '' : '<option value="__add">+ Add a test pitcher…</option>');
 }
 function confirmSwitch() { return true; }
 // Pop-up reminder to save before leaving a pitcher: Save and switch / Switch without saving / Keep editing
