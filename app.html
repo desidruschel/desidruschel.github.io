@@ -119,6 +119,12 @@ nav.tabs a { font-family: var(--font-display); font-size: 19px; font-weight: 600
 nav.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
 main { padding-block: 22px 60px; }
 section.view { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
+.dropzone { display: flex; align-items: center; justify-content: center; border: 2px dashed var(--line); border-radius: 8px; padding: 22px; cursor: pointer; color: var(--muted); font-size: 14px; }
+.dropzone.drag { border-color: var(--accent, #2b6cb0); color: inherit; } .dropzone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.dsub { font-size: 12.5px; color: var(--muted); } .upres table, .mttab { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 10px; }
+.upres th, .upres td, .mttab th, .mttab td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; } .upres .num, .mttab .num { text-align: right; font-variant-numeric: tabular-nums; }
+.upres .warn { color: #a5521b; } .mtrow { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; margin-top: 10px; } .mtrow label { font-size: 12.5px; color: var(--muted); display: grid; gap: 3px; } .mtrow .grow { flex: 1; min-width: 160px; }
+.mttab input, .mttab select { width: 100%; min-width: 0; } .mth { font-size: 14px; margin: 18px 0 6px; } .mtlist li { margin: 4px 0; }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 18px; min-width: 0; }
 .panel > h2, .panel-head h2 { font-family: var(--font-display); font-weight: 600; font-size: 22px; margin: 0; letter-spacing: .01em; }
 .panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 16px; margin-bottom: 10px; }
@@ -571,6 +577,7 @@ body.live .pv-preview { display: none; }
   <a href="#explore" data-view="explore">Explore</a>
   <a href="#builder" data-view="builder">Builder</a>
   <a href="#checks" data-view="checks">Checks</a>
+  <a href="#data" data-view="data">Data</a>
 </div></nav>
 
 <main class="wrap">
@@ -667,6 +674,33 @@ body.live .pv-preview { display: none; }
 
   <div id="toast" class="toast" role="alert" hidden></div>
   <!-- PLAYER -->
+  <!-- DATA (live site, coaches only): device uploads and throws a device missed -->
+  <section class="view" id="view-data" hidden>
+    <div class="panel">
+      <div class="panel-head"><h2>Upload device files</h2><span class="dsub">Pocket Radar, Trackman bullpen and game files · CSV or Excel · any number of pitchers per file</span></div>
+      <p class="lead">Each row goes to the pitcher named on it. Throws already saved are never added twice, so uploading the same file again is safe. Names that don't match a pitcher are listed; add them to the Master's <b>PitcherAliases</b> tab and upload again.</p>
+      <label class="dropzone" id="up-drop"><input type="file" id="up-files" multiple accept=".csv,.txt,.xlsx,.xls"><span>Choose files, or drag them here</span></label>
+      <div id="up-result" class="upres" aria-live="polite"></div>
+    </div>
+    <div class="panel" style="margin-top:14px">
+      <div class="panel-head"><h2>Add throws a device missed</h2><span class="dsub" id="mt-who"></span></div>
+      <p class="lead">Saved as <b>estimated</b> throws for this pitcher; they count toward workload like any other throw. Enter groups (a count at about one velocity) or one throw at a time.</p>
+      <div class="mtrow"><label>Date <input type="date" id="mt-date"></label><label class="grow">Note <input type="text" id="mt-note" maxlength="80" placeholder="e.g. Trackman down for the first inning"></label>
+        <div class="seg" role="group" aria-label="Entry style"><button type="button" id="mt-groups" aria-pressed="true">Groups</button><button type="button" id="mt-single" aria-pressed="false">One by one</button></div></div>
+      <table class="mttab"><thead id="mt-head"></thead><tbody id="mt-body"></tbody></table>
+      <div class="mtrow"><button type="button" class="ghost" id="mt-addrow">+ Add a group</button><span class="grow"></span><span id="mt-total" class="dsub"></span><button type="button" id="mt-save">Save throws</button></div>
+      <p id="mt-status" class="status" role="status"></p>
+      <h3 class="mth">Added by hand for this pitcher</h3>
+      <div id="mt-list" class="dsub">Loading…</div>
+    </div>
+    <div class="panel" style="margin-top:14px">
+      <div class="panel-head"><h2>Trackman sessions</h2><span class="dsub" id="ts-who"></span></div>
+      <p class="lead">Uploaded Trackman sessions for this pitcher. Change a session to side, touch &amp; feel or game bullpen if it was set wrong, including ones the daily upload set automatically.</p>
+      <div id="ts-list" class="upres dsub">Loading…</div>
+      <p id="ts-status" class="status" role="status"></p>
+    </div>
+  </section>
+
   <section class="view" id="view-player" hidden>
     <div class="pv-preview">Preview of what a pitcher sees on their phone. Pitchers only see their own days and never the coach's planning tools or calculation details.</div>
     <div class="pv" id="pv"></div>
@@ -769,6 +803,7 @@ const DEFAULT_PITCHERS = [{id: 'will', name: 'Will H. Warren'}, {id: 'test1', na
 /* LIVE_SITE: the pilot site (window.__LIVE set by its sign-in page). Pitchers and roles come from the server; no built-in data. */
 const LIVE_SITE = window.__LIVE || null;
 const LIVE_PLAYER = !!(LIVE_SITE && LIVE_SITE.role === 'player');
+const DATA_OK = !!(LIVE_SITE && (LIVE_SITE.role === 'coach' || LIVE_SITE.role === 'admin') && window.pwCall);
 if (LIVE_SITE) { document.body.classList.add('live'); const eb = document.getElementById('eyebrow'); if (eb) eb.textContent = LIVE_SITE.role === 'player' ? 'Your throwing program' : 'Pitcher workload'; } if (LIVE_PLAYER) document.body.classList.add('live-player');
 let PITCHERS = DEFAULT_PITCHERS; try { const s = JSON.parse(localStorage.getItem('wl-pitchers') || 'null'); if (Array.isArray(s) && s.length) PITCHERS = s; } catch (e) {}
 let PITCHER = 'will'; try { PITCHER = localStorage.getItem('wl-pitcher') || 'will'; } catch (e) {}
@@ -3196,7 +3231,7 @@ async function connectStore() {
 }
 
 // ---------- routing ----------
-const VIEWS = ['checks', 'explore', 'builder', 'player'];
+const VIEWS = ['checks', 'explore', 'builder', 'player', 'data'];
 let rendered = {};
 // ---------- player view ----------
 window.__t = {get S() { return S; }, addReport: (d, r) => { selfReports.set(d, r); reportsChanged(); }};
@@ -3387,13 +3422,14 @@ function renderPlayerInner() {
 }
 function route() {
   let v = VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'player';
-  if (LIVE_PLAYER || (LIVE_SITE && v === 'checks')) v = 'player';
+  if (LIVE_PLAYER || (LIVE_SITE && v === 'checks') || (v === 'data' && !DATA_OK)) v = 'player';
   S.view = v;
   VIEWS.forEach(x => { document.getElementById('view-' + x).hidden = x !== v; });
   document.querySelectorAll('nav.tabs a').forEach(a => { if (a.dataset.view === v) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   if (v === 'explore') renderExplore();
   if (v === 'builder') { renderWeek(); renderForecast(); }
   if (v === 'player') renderPlayer();
+  if (v === 'data') renderData();
   hideTip();
 }
 window.addEventListener('hashchange', route);
@@ -3486,6 +3522,129 @@ for (const [btn, box, label] of [['ctrls-toggle', '.top .ctrls', 'Settings'], ['
   document.getElementById('padd-ok').addEventListener('click', add);
   document.getElementById('padd-name').addEventListener('keydown', e => { if (e.key === 'Enter') add(); if (e.key === 'Escape') document.getElementById('padd').hidden = true; });
 }
+// ---------- Data page: device uploads and throws a device missed (live site, coaches) ----------
+const UP_KEEP = ['date', 'time', 'player name', 'player', 'athlete', 'speed', 'unit', 'session title', 'session', 'pitcher', 'relspeed', 'pitchsession', 'practicetype', 'taggedpitchtype', 'pitch type', 'autopitchtype', 'paofinning', 'batter', 'inning', 'pitchofpa', 'top/bottom', 'velocity', 'playername', 'warmup or game', 'sessionid'];
+const MT_CATS = [['cp', 'Catch play', .75], ['side', 'Side / bullpen', .95], ['side_wu', 'Side warm-up', .85], ['pg_side', 'Pre-game bullpen', .95], ['pg_wu', 'Pre-game warm-up', .85], ['game', 'Game', 1], ['game_wu', 'Game warm-up', .88]];
+const MT = {single: false, rows: [], list: null};
+function csvParse(text) {
+  const out = []; let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) { const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; continue; }
+    if (c === '"') q = true; else if (c === ',') { row.push(f); f = ''; } else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(f); out.push(row); row = []; f = ''; } else f += c; }
+  if (f !== '' || row.length) { row.push(f); out.push(row); }
+  return out.filter(r => r.some(x => String(x).trim() !== ''));
+}
+let XLSX_LIB = null;
+const loadXlsx = () => XLSX_LIB || (XLSX_LIB = new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'; sc.onload = () => res(window.XLSX); sc.onerror = () => rej(new Error('Could not load the Excel reader')); document.head.appendChild(sc); }));
+const pad2 = n => String(n).padStart(2, '0');
+async function readTable(file) {
+  if (/\.xlsx?$/i.test(file.name)) {
+    const X = await loadXlsx(); const wb = X.read(await file.arrayBuffer(), {type: 'array', cellDates: true});
+    const ws = wb.Sheets[wb.SheetNames[0]]; const t = X.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ''});
+    return t.map(r => r.map(v => v instanceof Date ? (v.getFullYear() < 1901 ? `${pad2(v.getHours())}:${pad2(v.getMinutes())}:${pad2(v.getSeconds())}` : `${v.getFullYear()}-${pad2(v.getMonth() + 1)}-${pad2(v.getDate())}`) : v));
+  }
+  return csvParse(await file.text());
+}
+function trimTable(t) { // keep the header row and only the columns the uploader reads
+  let hi = -1; for (let i = 0; i < Math.min(t.length, 15); i++) { const h = (t[i] || []).map(x => String(x).trim().toLowerCase()); if (h.includes('relspeed') || (h.includes('speed') && (h.includes('player name') || h.includes('player') || h.includes('athlete'))) || (h.includes('velocity') && (h.includes('playername') || h.includes('warmup or game')))) { hi = i; break; } }
+  if (hi < 0) return t.slice(0, 20);
+  const h = t[hi].map(x => String(x).trim().toLowerCase()); const keep = h.map((x, j) => UP_KEEP.includes(x) ? j : -1).filter(j => j >= 0);
+  return t.slice(hi).map(r => keep.map(j => r[j] ?? ''));
+}
+let UP_FILES = [], UP_KEEP_SET = new Set(), UP_DT = {};
+async function upPick(fileList) {
+  const box = document.getElementById('up-result'); const files = [...fileList]; if (!files.length) return;
+  box.innerHTML = `<p class="dsub">Reading ${files.length} file${files.length > 1 ? 's' : ''}…</p>`;
+  try { UP_FILES = []; UP_KEEP_SET = new Set(); UP_DT = {}; for (const f of files) UP_FILES.push({name: f.name, table: trimTable(await readTable(f))});
+    box.innerHTML = '<p class="dsub">Checking which pitchers these throws belong to…</p>';
+    upShow(await window.pwCall('ingest', {files: UP_FILES, dryRun: true}), false);
+  } catch (e) { box.innerHTML = `<p class="warn">${esc(e.message || String(e))}</p>`; }
+}
+const KIND_LABEL = {pocket: 'Pocket Radar', trackman: 'Trackman bullpen', game: 'Game file'};
+function upShow(r, done) {
+  const box = document.getElementById('up-result'); const names = o => Object.entries(o || {}).map(([n, c]) => `${esc(n)} (${c})`).join(', ');
+  const fr = r.files.map(f => `<tr><td>${esc(f.name)}<div class="dsub">${f.kind ? KIND_LABEL[f.kind] + (f.live ? ' · live BP / sim' : '') : '<span class="warn">' + esc(f.note || 'Not recognised') + '</span>'}</div></td><td class="num">${f.rows}</td><td class="num"><b>${f.added}</b></td><td class="num">${f.dup}</td><td class="num">${f.skipped + f.outside}</td>
+    <td>${f.ignored ? `<div class="dsub">${f.ignored} row${f.ignored === 1 ? '' : 's'} for names set to IGNORE</div>` : ''}${Object.keys(f.unmatched).length ? `<span class="warn">Not matched: ${names(f.unmatched)}</span>` : ''}${Object.keys(f.notYours).length ? `<div class="warn">Not on your roster: ${names(f.notYours)}</div>` : ''}</td></tr>`).join('');
+  const pr = Object.values(r.pitchers).sort((a, b) => a.name.localeCompare(b.name)).map(p => `<li><b>${esc(p.name)}</b>: ${p.added} throw${p.added === 1 ? '' : 's'} on ${p.days.length} day${p.days.length === 1 ? '' : 's'} (${p.days.length > 3 ? `${nice(p.days[0])} – ${nice(p.days[p.days.length - 1])}` : p.days.map(nice).join(', ')})</li>`).join('');
+  box.innerHTML = `<table><thead><tr><th>File</th><th class="num">Rows</th><th class="num">${done ? 'Added' : 'To add'}</th><th class="num">Already saved</th><th class="num">Skipped</th><th></th></tr></thead><tbody>${fr}</tbody></table>
+    ${pr ? `<ul class="mtlist">${pr}</ul>` : ''}
+    ${r.sessions && r.sessions.length ? `<h3 class="mth">Trackman sessions: side, touch &amp; feel or game bullpen?</h3><p class="dsub">Trackman only marks Warmup and Live. On a game day, a session close to game time starts as a game bullpen; otherwise each starts from the day type (logged, or the plan). Change any that are wrong. Warm-ups stay the warm-up of whichever you pick.</p>
+      <table><tbody>${r.sessions.map(m => { const v = UP_DT[m.key] || m.bucket; return `<tr><td>${esc(m.name)}</td><td>${nice(m.date)} <span class="dsub">${esc(String(m.start).slice(0, 5))}–${esc(String(m.end).slice(0, 5))}</span></td><td class="num">${m.warm} warm-up · ${m.live} live</td><td>${done ? `<b>${esc(m.bucket)}</b>` : `<select data-dt="${esc(m.key)}">${['Side', 'Touch & Feel', 'Game bullpen'].map(o => `<option${o === v ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`}</td><td class="dsub">${m.from === 'file' ? 'labelled in the file' : m.from === 'game' ? 'near game time' : m.from === 'logged' ? 'day logged as ' + esc(m.dayType) : m.from === 'plan' ? 'planned as ' + esc(m.dayType) : '<span class="warn">no plan or log; check</span>'}</td></tr>`; }).join('')}</tbody></table>` : ''}
+    ${r.spikes && r.spikes.length ? `<h3 class="mth">Possible stray readings</h3><p class="dsub">Pocket Radar speeds 20+ mph above the throws on either side (25+ at the start or end of a day), usually a mis-read. They are left out unless you tick Keep.</p>
+      <table><tbody>${r.spikes.map(x => `<tr><td>${esc(x.name)}</td><td>${nice(x.date)} ${esc(x.time)}</td><td class="num"><b>${x.mph}</b> mph</td><td class="dsub">between ${x.prev ?? '–'} and ${x.next ?? '–'}</td><td>${done ? (x.kept ? 'Kept' : 'Left out') : `<label><input type="checkbox" data-keep="${esc(x.key)}"${UP_KEEP_SET.has(x.key) ? ' checked' : ''}> Keep</label>`}</td></tr>`).join('')}</tbody></table>` : ''}
+    <div class="mtrow">${done ? `<span class="grow">Saved <b>${r.added}</b> throws.</span><button type="button" id="up-reload">Reload to see them</button>`
+      : (r.added || (r.spikes || []).length) ? `<span class="grow dsub">Skipped = blank rows, placeholders and speeds outside 30–110 mph. Pocket Radar speeds under 61 are saved as 61, as in the workbooks.</span><button type="button" class="ghost" id="up-cancel">Cancel</button><button type="button" id="up-save">Save <span id="up-n">${r.added}</span> throws</button>` : `<span class="grow">Nothing new to add.</span>`}</div>`;
+  const upN = () => { const n = document.getElementById('up-n'); if (n) n.textContent = r.added + UP_KEEP_SET.size; };
+  box.querySelectorAll('[data-dt]').forEach(sl => sl.addEventListener('change', () => { UP_DT[sl.dataset.dt] = sl.value; }));
+  box.querySelectorAll('[data-keep]').forEach(c => c.addEventListener('change', () => { if (c.checked) UP_KEEP_SET.add(c.dataset.keep); else UP_KEEP_SET.delete(c.dataset.keep); upN(); })); upN();
+  const b = id => document.getElementById(id);
+  if (b('up-save')) b('up-save').onclick = async () => { b('up-save').disabled = true; b('up-save').textContent = 'Saving…'; try { upShow(await window.pwCall('ingest', {files: UP_FILES, keep: [...UP_KEEP_SET], buckets: Object.fromEntries((r.sessions || []).map(m => [m.key, UP_DT[m.key] || m.bucket]))}), true); } catch (e) { box.insertAdjacentHTML('beforeend', `<p class="warn">${esc(e.message || String(e))}</p>`); b('up-save').disabled = false; b('up-save').textContent = 'Try again'; } };
+  if (b('up-cancel')) b('up-cancel').onclick = () => { UP_FILES = []; box.innerHTML = ''; document.getElementById('up-files').value = ''; };
+  if (b('up-reload')) b('up-reload').onclick = () => location.reload();
+}
+const mtSuggest = cat => { const c = MT_CATS.find(x => x[0] === cat); const fb = AVG_FB || (S.max ? S.max - 4 : 90); return c ? Math.round(fb * c[2]) : ''; };
+function mtNewRow(cat) { cat = cat || (MT.rows.length ? MT.rows[MT.rows.length - 1].cat : 'side'); return {cat, count: MT.single ? 1 : '', mph: mtSuggest(cat), time: '', pt: '', auto: true}; }
+function mtRender() {
+  document.getElementById('mt-who').textContent = PITCHER_NAME;
+  document.getElementById('mt-groups').setAttribute('aria-pressed', String(!MT.single)); document.getElementById('mt-single').setAttribute('aria-pressed', String(MT.single));
+  document.getElementById('mt-addrow').textContent = MT.single ? '+ Add a throw' : '+ Add a group';
+  document.getElementById('mt-head').innerHTML = MT.single ? '<tr><th>Throw type</th><th>Velocity (mph)</th><th>Time (optional)</th><th>Pitch type (optional)</th><th></th></tr>' : '<tr><th>Throw type</th><th>How many</th><th>About (mph)</th><th></th></tr>';
+  const opts = c => MT_CATS.map(([k, l]) => `<option value="${k}"${k === c ? ' selected' : ''}>${l}</option>`).join('');
+  document.getElementById('mt-body').innerHTML = MT.rows.map((r, i) => `<tr data-i="${i}"><td><select data-k="cat">${opts(r.cat)}</select></td>${MT.single ? '' : `<td><input type="number" data-k="count" min="1" max="300" value="${esc(r.count)}" placeholder="e.g. 15"></td>`}
+    <td><input type="number" data-k="mph" min="30" max="110" step="0.1" value="${esc(r.mph)}"></td>${MT.single ? `<td><input type="time" data-k="time" step="1" value="${esc(r.time)}"></td><td><input type="text" data-k="pt" maxlength="20" value="${esc(r.pt)}" placeholder="e.g. Fastball"></td>` : ''}
+    <td><button type="button" class="ghost" data-del="${i}" aria-label="Remove row">✕</button></td></tr>`).join('');
+  const n = MT.rows.reduce((a, r) => a + (MT.single ? 1 : (parseInt(r.count, 10) || 0)), 0);
+  document.getElementById('mt-total').textContent = n ? `${n} throw${n === 1 ? '' : 's'} on ${nice(document.getElementById('mt-date').value || TODAY)}` : '';
+}
+async function mtLoadList() {
+  const el = document.getElementById('mt-list'); el.textContent = 'Loading…';
+  try { const L = await window.pwCall('listManual', {pitcherId: PITCHER}); MT.list = L;
+    el.innerHTML = L.length ? `<ul class="mtlist">${L.map(x => `<li><b>${nice(x.date)}</b>: ${x.groups.map(g => `${g.count} × ${esc(g.label)} at ${g.mph} mph`).join(', ')}${x.note ? ` <span class="dsub">· ${esc(x.note)}</span>` : ''} <button type="button" class="ghost" data-undo="${esc(x.id)}">Remove</button></li>`).join('')}</ul>` : 'None yet.';
+  } catch (e) { el.textContent = e.message || String(e); }
+}
+let dataWired = false;
+async function tsLoad(list) {
+  const el = document.getElementById('ts-list'); document.getElementById('ts-who').textContent = PITCHER_NAME;
+  try { const L = list || await window.pwCall('listSessions', {pitcherId: PITCHER});
+    el.innerHTML = L.length ? `<table><tbody>${L.slice(0, 60).map(x => `<tr><td>${nice(x.date)} <span class="dsub">${esc(String(x.start).slice(0, 5))}–${esc(String(x.end).slice(0, 5))}</span></td><td class="num">${x.warm} warm-up · ${x.live} live</td><td><select data-ts="${esc(x.id)}">${['Side', 'Touch & Feel', 'Game bullpen'].map(o => `<option${o === x.bucket ? ' selected' : ''}>${o}</option>`).join('')}</select></td><td class="dsub">${x.dayType ? 'day type: ' + esc(x.dayType) : ''}</td></tr>`).join('')}</tbody></table>${L.length > 60 ? `<p class="dsub">Showing the latest 60 of ${L.length}.</p>` : ''}` : 'No uploaded Trackman sessions yet.';
+  } catch (e) { el.textContent = e.message || String(e); }
+}
+function mtStatus(msg, kind = '') { const el = document.getElementById('mt-status'); el.textContent = msg; el.className = 'status ' + kind; }
+function renderData() {
+  if (!DATA_OK) return;
+  if (!dataWired) { dataWired = true;
+    const inp = document.getElementById('up-files'), dz = document.getElementById('up-drop');
+    inp.addEventListener('change', () => upPick(inp.files));
+    ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('drag'); }));
+    ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('drag'); }));
+    dz.addEventListener('drop', e => upPick(e.dataTransfer.files));
+    document.getElementById('mt-date').value = TODAY; document.getElementById('mt-date').max = TODAY;
+    document.getElementById('mt-date').addEventListener('change', mtRender);
+    const mode = single => { MT.single = single; MT.rows = [mtNewRow()]; mtRender(); };
+    document.getElementById('mt-groups').addEventListener('click', () => mode(false)); document.getElementById('mt-single').addEventListener('click', () => mode(true));
+    document.getElementById('mt-addrow').addEventListener('click', () => { MT.rows.push(mtNewRow()); mtRender(); });
+    const body = document.getElementById('mt-body');
+    body.addEventListener('input', e => { const tr = e.target.closest('tr'), k = e.target.dataset.k; if (!tr || !k) return; const r = MT.rows[+tr.dataset.i]; r[k] = e.target.value; if (k === 'mph') r.auto = false; if (k === 'cat' && r.auto) r.mph = mtSuggest(r.cat); if (k === 'cat' || k === 'count') mtRender(); });
+    body.addEventListener('change', e => { if (e.target.dataset.k === 'cat') { const r = MT.rows[+e.target.closest('tr').dataset.i]; if (r.auto) r.mph = mtSuggest(r.cat); mtRender(); } });
+    body.addEventListener('click', e => { const d = e.target.closest('[data-del]'); if (!d) return; MT.rows.splice(+d.dataset.del, 1); if (!MT.rows.length) MT.rows.push(mtNewRow()); mtRender(); });
+    document.getElementById('mt-list').addEventListener('click', async e => { const b = e.target.closest('[data-undo]'); if (!b) return; const x = (MT.list || []).find(y => y.id === b.dataset.undo);
+      if (!confirm(`Remove the throws added by hand on ${nice(x.date)}? This takes them out of ${PITCHER_NAME}'s workload.`)) return;
+      b.disabled = true; try { await window.pwCall('deleteManual', {pitcherId: PITCHER, importId: b.dataset.undo}); mtStatus('Removed. Reload to update the charts.', 'ok'); mtLoadList(); } catch (er) { mtStatus(er.message || String(er), 'err'); b.disabled = false; } });
+    document.getElementById('mt-save').addEventListener('click', async () => {
+      const date = document.getElementById('mt-date').value, rows = MT.rows.filter(r => r.mph !== '' && (MT.single || parseInt(r.count, 10) > 0)).map(r => ({cat: r.cat, mph: +r.mph, count: MT.single ? 1 : parseInt(r.count, 10), time: r.time || '', pitchType: r.pt || ''}));
+      if (!date) { mtStatus('Pick a date first.', 'err'); return; } if (!rows.length) { mtStatus(MT.single ? 'Enter a velocity for each throw.' : 'Enter how many throws and a velocity.', 'err'); return; }
+      if (rows.some(r => r.mph < 30 || r.mph > 110)) { mtStatus('Velocities must be between 30 and 110 mph.', 'err'); return; }
+      const btn = document.getElementById('mt-save'); btn.disabled = true; btn.textContent = 'Saving…';
+      try { const r = await window.pwCall('addThrows', {pitcherId: PITCHER, date, rows, note: document.getElementById('mt-note').value}); mtStatus(`Added ${r.added} estimated throw${r.added === 1 ? '' : 's'} on ${nice(date)}. Reload to update the charts.`, 'ok');
+        MT.rows = [mtNewRow()]; document.getElementById('mt-note').value = ''; mtRender(); mtLoadList(); }
+      catch (e) { mtStatus(e.message || String(e), 'err'); } finally { btn.disabled = false; btn.textContent = 'Save throws'; } });
+    MT.rows = [mtNewRow('side')];
+    document.getElementById('ts-list').addEventListener('change', async e => { const sl = e.target.closest('[data-ts]'); if (!sl) return; const st = document.getElementById('ts-status'); sl.disabled = true; st.className = 'status'; st.textContent = 'Saving…';
+      try { const r = await window.pwCall('setSession', {pitcherId: PITCHER, sessionId: sl.dataset.ts, bucket: sl.value}); st.className = 'status ok'; st.textContent = `Changed ${r.changed} throws to ${sl.value}. Reload to update the charts.`; tsLoad(r.sessions); }
+      catch (er) { st.className = 'status err'; st.textContent = er.message || String(er); sl.disabled = false; } });
+  }
+  mtRender(); mtLoadList(); tsLoad();
+}
 function renderPitcherSelect() {
   const ps = document.getElementById('pitcher'); if (!ps) return;
   const tag = x => x.id === 'will' ? ' · from the sheet' : x.id === 'test1' || /^test/.test(x.id) ? ' · test' : ' · no data yet';
@@ -3520,6 +3679,7 @@ window.matchMedia('(max-width: 640px)').addEventListener('change', () => { if (S
 try { const bm = localStorage.getItem('wl-bmode'); if (bm === 'week' || bm === 'month' || bm === 'day') S.b.mode = bm; else if (isNarrow()) S.b.mode = 'day'; } catch (e) { if (isNarrow()) S.b.mode = 'day'; }
 if (LIVE_SITE) { document.querySelector('nav.tabs a[data-view="checks"]').remove(); document.getElementById('view-checks').innerHTML = ''; }
 else if (IS_TEST) { document.getElementById('view-checks').innerHTML = '<div class="panel"><p class="note">Checks compare the rebuild with Will\'s Google Sheet, so they only apply to Will.</p></div>'; } else renderChecks();
+if (!DATA_OK) { const a = document.querySelector('nav.tabs a[data-view="data"]'); if (a) a.remove(); document.getElementById('view-data').innerHTML = ''; }
 setupExplore(); setupPitchTable(); setupMode(); applyRole(); setupBuilder(); setMode(S.b.mode); route();
 connectStore();
 connectSchedule();
@@ -3572,6 +3732,7 @@ const mcp = {
 let ME = null;
 const user = {id: async () => ME.email, me: async () => ({id: ME.email, name: ME.name}), isOwner: () => false, canEdit: () => ME.role !== 'player', can: () => ME.role !== 'player'};
 window.claude = {use: async n => n === 'db' ? db : n === 'mcp' ? mcp : n === 'user' ? user : null};
+window.pwCall = call; /* direct server calls for pages the prototype does not have (device uploads, missed throws) */
 
 /* ---------- sign-in screen ---------- */
 let gisReady = false;
