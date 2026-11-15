@@ -3423,7 +3423,10 @@ roleSel.value = S.role;
 try { S.inSeason = localStorage.getItem('wl-season') === 'in'; } catch (e) {}
 let TEAM_ACMODE = 'early'; // team-wide ACWR start, from the Master's AppSettings tab (acwr_start)
 if (LIVE_SITE) S.acMode = TEAM_ACMODE; else { try { if (localStorage.getItem('wl-acmode') === 'early') S.acMode = 'early'; } catch (e) {} }
-function applyAcMode() { if (LIVE_SITE) for (const id of ['acm-sheet', 'acm-early']) { const el = document.getElementById(id); el.disabled = true; el.title = 'Team setting: acwr_start on the Master\u2019s AppSettings tab'; } document.getElementById('acm-sheet').setAttribute('aria-pressed', String(S.acMode !== 'early')); document.getElementById('acm-early').setAttribute('aria-pressed', String(S.acMode === 'early')); ACWR_TIP = S.acMode === 'early' ? ACWR_TIP_BASE + ACWR_EARLY : ACWR_TIP_BASE; }
+function applyAcMode() { if (LIVE_SITE) { const seg = document.getElementById('acm-sheet').parentElement; seg.hidden = true; seg.style.display = 'none';
+    let t = document.getElementById('acm-team'); if (!t) { t = document.createElement('span'); t.id = 'acm-team'; t.style.cssText = 'font-size:12.5px;margin-left:8px'; seg.after(t); }
+    t.innerHTML = `<b>${S.acMode === 'early' ? 'Early estimate' : 'Sheet method'}</b> <span style="color:var(--muted)">· team setting (Master \u203a AppSettings)</span>`;
+    t.title = 'Set for everyone by acwr_start on the Master\u2019s AppSettings tab: early or sheet'; } document.getElementById('acm-sheet').setAttribute('aria-pressed', String(S.acMode !== 'early')); document.getElementById('acm-early').setAttribute('aria-pressed', String(S.acMode === 'early')); ACWR_TIP = S.acMode === 'early' ? ACWR_TIP_BASE + ACWR_EARLY : ACWR_TIP_BASE; }
 applyAcMode();
 function renderCarry() {
   const el = document.getElementById('ac-carry'); if (!el) return;
