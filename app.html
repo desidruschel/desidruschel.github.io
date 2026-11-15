@@ -2776,7 +2776,7 @@ const reset = (o, entries) => { Object.keys(o).forEach(k => delete o[k]); Object
 function applyMaster() {
   const R = masterRows; const used = [];
   if (R.Seasons) { const iso = v => { const x = s_(v); return /^\d{4}-\d\d-\d\d$/.test(x) ? x : schedIso(x); };
-    const ss = R.Seasons.map(r => ({id: s_(r[0]), start: iso(r[2]), end: iso(r[3])})).filter(x => x.id && x.start && x.end && x.start <= x.end);
+    const ss = R.Seasons.map(r => ({id: s_(r[0]), start: iso(r[2]), end: iso(r[3]), inStart: iso(r[4]) || null})).filter(x => x.id && x.start && x.end && x.start <= x.end);
     if (ss.length) { SEASONS = ss; used.push('Seasons'); updAcRestarts(); } }
   if (R.KeyDates) { const kd = new Map(); R.KeyDates.forEach(r => { const raw = s_(r[0]); const d = /^\d{4}-\d\d-\d\d$/.test(raw) ? raw : schedIso(raw); if (d) kd.set(d, {label: s_(r[1]) || 'Key date', style: s_(r[2]).toLowerCase() === 'dashed' ? 'dashed' : 'solid'}); }); KEY_DATES = kd; used.push('KeyDates'); }
   if (R.Pitchers) { const rows = R.Pitchers.filter(r => s_(r[0]) && s_(r[1])); if (rows.length) {
@@ -2790,6 +2790,7 @@ function applyMaster() {
     MASTER_MAX = mx >= 70 && mx <= 110 ? mx : null;
     { const fb = row ? parseFloat(s_(row[7])) : NaN; MASTER_FB = fb >= 60 && fb <= 110 ? fb : null; if (!fbTouched) { AVG_FB = MASTER_FB; syncFb(); } }
     if (MASTER_MAX !== null && !maxTouched && S.max !== MASTER_MAX) { S.max = MASTER_MAX; document.getElementById('maxv').value = MASTER_MAX; }
+    { const rl = row ? s_(row[3]).toLowerCase() : ''; MASTER_ROLE = AC_RANGE[rl] ? rl : null; if (MASTER_ROLE && !roleTouched && S.role !== MASTER_ROLE) { S.role = MASTER_ROLE; roleSel.value = S.role; B.flagsKnown = null; } }
     document.getElementById('maxreset').textContent = `Reset to ${MASTER_MAX ?? 95}`;
     document.getElementById('pname').textContent = PITCHER_NAME; renderPitcherSelect(); used.push('Pitchers'); } }
   if (R.Intensity) { const rows = R.Intensity.filter(r => s_(r[0]) !== '' && !isNaN(+r[0]) && s_(r[1]) !== '' && !isNaN(+r[1])); if (rows.length) { rows.forEach(r => { MULT[+r[0]] = +r[1]; if (s_(r[2])) INT_DESC[+r[0]] = s_(r[2]); }); used.push('Intensity'); } }
@@ -2824,6 +2825,8 @@ function applyMaster() {
   if (R.AppSettings) { const kv = Object.fromEntries(R.AppSettings.filter(r => s_(r[0])).map(r => [s_(r[0]).toLowerCase(), s_(r[1]).toLowerCase()]));
     const m = kv.acwr_start === 'sheet' ? 'sheet' : kv.acwr_start === 'early' ? 'early' : null;
     if (m) { TEAM_ACMODE = m; if (LIVE_SITE && S.acMode !== m) { S.acMode = m; B.flagsKnown = null; } applyAcMode(); used.push('AppSettings'); } }
+  if (!seasonTouched) { const v = inSeasonNow(); if (v !== !!S.inSeason) { S.inSeason = v; B.flagsKnown = null; } }
+  applyRole();
   masterApplied = used.length;
   return used;
 }
@@ -3418,9 +3421,15 @@ function applyRole() {
   document.getElementById('role-note').textContent = `${S.inSeason ? 'In season' : 'Offseason'}: ACWR alerts outside ${lo.toFixed(2)}–${hi.toFixed(2)}${S.role === 'reliever' ? (S.inSeason ? ' (reliever in-season window)' : ' (relievers use 0.92–1.18 in season)') : ''}.${S.inSeason ? '' : ' Weekly phase limits apply.'} Daily workload axis tops out at ${fmt(wlTop())} workload units. How starters and relievers are set is still to be decided.`;
   const lg = document.getElementById('lg-range'); if (lg) lg.textContent = `${S.role === 'starter' ? 'Starter' : 'Reliever'}, ${S.inSeason ? 'in season' : 'offseason'}, range ${lo.toFixed(2)}–${hi.toFixed(2)}`;
 }
-try { const r = localStorage.getItem('wl-role'); if (r && AC_RANGE[r]) S.role = r; } catch (e) {}
+/* Role comes from the pitcher's row on the Master (Pitchers tab, role); offseason / in season from today's date and the
+   season's in_season_start (Master Seasons tab), falling back to an "Opening Day" key date. Changing either here lasts until
+   you switch pitchers, so each pitcher opens on his own settings. */
+let MASTER_ROLE = null, roleTouched = false, seasonTouched = false;
+const inSeasonNow = () => { const cs = seasonOf(TODAY); if (!cs) return false;
+  let st = cs.inStart || null; if (!st) for (const [d, k] of KEY_DATES) if (d >= cs.start && d <= cs.end && /opening day/i.test(k.label || '')) { st = d; break; }
+  return !!st && TODAY >= st && TODAY <= cs.end; };
+S.inSeason = inSeasonNow();
 roleSel.value = S.role;
-try { S.inSeason = localStorage.getItem('wl-season') === 'in'; } catch (e) {}
 let TEAM_ACMODE = 'early'; // team-wide ACWR start, from the Master's AppSettings tab (acwr_start)
 if (LIVE_SITE) S.acMode = TEAM_ACMODE; else { try { if (localStorage.getItem('wl-acmode') === 'early') S.acMode = 'early'; } catch (e) {} }
 function applyAcMode() { if (LIVE_SITE) { const seg = document.getElementById('acm-sheet').parentElement; seg.hidden = true; seg.style.display = 'none';
@@ -3442,7 +3451,6 @@ function renderCarry() {
   }));
 }
 renderCarry();
-try { const v = localStorage.getItem('wl-season-shown'); if (v) S.season = v; } catch (e) {}
 function renderSeasonPick() {
   const el = document.getElementById('season-pick'); if (!el) return; const cur = curSeason();
   const ss = [...SEASONS].sort((a, b) => a.start < b.start ? -1 : 1).reverse();
@@ -3451,7 +3459,7 @@ function renderSeasonPick() {
 }
 renderSeasonPick();
 document.getElementById('season-pick').addEventListener('change', e => {
-  S.season = e.target.value; try { localStorage.setItem('wl-season-shown', S.season); } catch (er) {}
+  S.season = e.target.value;
   const f = S.ex; [f.from, f.to] = seasonActuals(); const fa = document.getElementById('f-from'), fb = document.getElementById('f-to'); if (fa) fa.value = f.from; if (fb) fb.value = f.to;
   /* move the Builder and Player calendars into the season picked: today for the current season, else that season's first planned day */
   const cs = curSeason(); if (cs) { let d = TODAY0 >= cs.start && TODAY0 <= cs.end ? TODAY0 : null; if (!d) { for (const k of Object.keys(B.draft)) if (k >= cs.start && k <= cs.end && (!d || k < d)) d = k; } d = d || cs.start;
@@ -3459,8 +3467,8 @@ document.getElementById('season-pick').addEventListener('change', e => {
   renderSeasonPick(); route();
 });
 for (const [id, v] of [['acm-sheet', 'sheet'], ['acm-early', 'early']]) document.getElementById(id).addEventListener('click', () => { if (LIVE_SITE) { setStatus('ACWR start is a team setting. To change it, edit acwr_start on the Master\u2019s AppSettings tab (early or sheet).'); return; } S.acMode = v; try { localStorage.setItem('wl-acmode', v); } catch (e) {} applyAcMode(); B.flagsKnown = null; if (S.view === 'explore') renderExplore(); if (S.view === 'builder') { renderWeek(); renderForecast(); } });
-for (const [id, v] of [['season-off', false], ['season-in', true]]) document.getElementById(id).addEventListener('click', () => { S.inSeason = v; try { localStorage.setItem('wl-season', v ? 'in' : 'off'); } catch (e) {} B.flagsKnown = null; applyRole(); if (S.view === 'explore') renderExplore(); if (S.view === 'builder') { renderWeek(); renderForecast(); } });
-roleSel.addEventListener('change', () => { B.flagsKnown = null; S.role = roleSel.value; try { localStorage.setItem('wl-role', S.role); } catch (e) {} applyRole(); if (S.view === 'explore') renderExplore(); if (S.view === 'builder') { renderWeek(); renderForecast(); } });
+for (const [id, v] of [['season-off', false], ['season-in', true]]) document.getElementById(id).addEventListener('click', () => { S.inSeason = v; seasonTouched = true; B.flagsKnown = null; applyRole(); if (S.view === 'explore') renderExplore(); if (S.view === 'builder') { renderWeek(); renderForecast(); } });
+roleSel.addEventListener('change', () => { B.flagsKnown = null; S.role = roleSel.value; roleTouched = true; applyRole(); if (S.view === 'explore') renderExplore(); if (S.view === 'builder') { renderWeek(); renderForecast(); } });
 document.getElementById('maxreset').addEventListener('click', () => { maxTouched = false; const v = MASTER_MAX ?? 95; maxInput.value = v; applyMax(v); });
 
 for (const [btn, box, label] of [['ctrls-toggle', '.top .ctrls', 'Settings'], ['filters-toggle', '.filters-panel .filters', 'Filters']]) {
@@ -3484,7 +3492,7 @@ function renderPitcherSelect() {
   // alphabetical by last name ("De los Santos" sorts under D); test pitchers last
   const last = n => { const t = String(n || '').replace(/,?\s+(jr\.?|sr\.?|ii|iii|iv)$/i, '').trim().split(/\s+/);
     const i = t.findIndex((w, k) => k > 0 && /^(de|del|della|da|di|van|von|la|le|st\.?)$/i.test(w)); return (i > 0 ? t.slice(i) : t.slice(-1)).join(' '); };
-  const isTest = x => x.id === 'test1' || /^test/.test(x.id) || x.test;
+  const isTest = x => (x.id === 'test1' || /^test/.test(x.id) || !!x.test) ? 1 : 0;
   const list = PITCHERS.slice().sort((a, b) => (isTest(a) - isTest(b)) || last(a.name).localeCompare(last(b.name), undefined, {sensitivity: 'base'}) || String(a.name).localeCompare(String(b.name)));
   ps.innerHTML = list.map(x => `<option value="${esc(x.id)}" ${x.id === PITCHER ? 'selected' : ''}>${esc(x.name)}${tag(x)}</option>`).join('') + (LIVE_SITE ? '' : '<option value="__add">+ Add a test pitcher…</option>');
 }
