@@ -536,6 +536,8 @@ td.sr-ok { color: var(--good); font-weight: 600; } td.sr-mid { color: var(--warn
 body.live-player nav.tabs, body.live-player .ctrls, body.live-player #ctrls-toggle, body.live-player .pv-preview, body.live-player #master-status, body.live-player #sched-status, body.live-player #meta, body.live-player .pswitch { display: none !important; }
 body.live .pv-preview { display: none; }
 .linkbtn{background:none;border:0;padding:0 2px;color:var(--accent);text-decoration:underline;cursor:pointer;font:inherit}
+.pv-tlscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.pv-tlscroll #pv-tl-ch{min-width:620px}.pv-tl .pv-ch-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px}
+#pv-tl-ch svg{width:100%;height:auto;display:block}#pv-tl-ch .tlh{font:600 11.5px var(--font,inherit);fill:var(--ink)}#pv-tl-ch .tlt{font-size:10px;fill:var(--muted)}#pv-tl-ch .tlr{font-size:10.5px;fill:var(--muted)}#pv-tl-ch .tlbad{fill:var(--bad);font-weight:700}#pv-tl-table td.bad{color:var(--bad);font-weight:600}#pv-tl-table td.ok{color:var(--good)}#pv-tl-table tr.inn td:first-child{padding-left:14px}#pv-tl-table td,#pv-tl-table th{white-space:nowrap;padding:6px 6px;font-size:13px}#pv-tl-table td:first-child{white-space:normal}
 .tlnav{display:flex;gap:4px;align-items:center}.tlnav button{padding:2px 9px}
 #ch-tl svg{width:100%;height:auto;display:block}#ch-tl .tlh{font:600 11.5px var(--font,inherit);fill:var(--ink)}#ch-tl .tlt{font-size:10px;fill:var(--muted)}
 #ch-tl .tlr{font-size:10.5px;fill:var(--muted)}#ch-tl .tlbad{fill:var(--bad);font-weight:700}
@@ -1327,11 +1329,14 @@ let REST_RULES = [{role: 'starter', from: 'plyo_wu', to: 'cp', min: 2}, {role: '
 let ACT_TIMES = new Map();
 const tlLong = d => `${DOW[dow(d)]} ${nice(d)}, ${d.slice(0, 4)}`;
 const TL = {date: null, lo: null, hi: null};
+const TLID = {tl: {ch: 'ch-tl', table: 'tl-table', plyo: 'tl-plyo', note: 'tl-note', date: 'tl-date'}, pv: {ch: 'pv-tl-ch', table: 'pv-tl-table', plyo: 'pv-tl-plyo', note: 'pv-tl-note'}};
+const tlEl = (w, k) => document.getElementById(TLID[w][k]);
 const TL_GROUPS = {plyo_wu: 'Plyo warmup', cp: 'Catch play', plyo_hi: 'Plyo high', bullpen: 'Bullpen', game: 'Game'};
 function tlGroupKey(v) { const t = s_(v).toLowerCase(); return /plyo.*(warm|wu)/.test(t) ? 'plyo_wu' : /plyo.*(high|hi)/.test(t) ? 'plyo_hi' : /catch|^cp$/.test(t) ? 'cp' : /bullpen|side|mound/.test(t) ? 'bullpen' : /game/.test(t) ? 'game' : ''; }
 const tlSecs = t => { const m = /^(\d{1,2}):(\d\d):(\d\d(?:\.\d+)?)/.exec(s_(t)); return m && +m[1] < 24 ? +m[1] * 3600 + +m[2] * 60 + +m[3] : null; };
 const tlHM = x => { if (x === null || x === undefined) return '–'; x = Math.round(x); const h = Math.floor(x / 3600) % 24, mi = Math.floor(x % 3600 / 60); return `${h % 12 || 12}:${String(mi).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
 const tlDur = x => { x = Math.max(0, Math.round(x)); const m = Math.floor(x / 60), sec = x % 60; return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : m ? `${m}m${sec ? ' ' + sec + 's' : ''}` : `${sec}s`; };
+const tlSpan = (a, b) => { const x = tlHM(a), y = tlHM(b); return x.slice(-2) === y.slice(-2) ? `${x.slice(0, -3)}–${y}` : `${x}–${y}`; };
 const tlHasTimes = d => throws.some(t => t[0] === d && tlSecs(t[1]) !== null);
 const TL_KIND = {cp: 'cp', mw: 'mound', mp: 'mound', gbw: 'gbullpen', gbp: 'gbullpen', gw: 'game', gp: 'game'};
 const TL_LABEL = {plyo_wu: 'Plyo warmup', cp: 'Catch play', plyo_hi: 'Plyo high', mound: 'Bullpen (side / T&F)', gbullpen: 'Game bullpen', game: 'Game'};
@@ -1375,27 +1380,32 @@ function tlWire() {
   document.getElementById('tl-date').addEventListener('change', e => { if (e.target.value) { TL.date = e.target.value; tlDraw(); } });
   document.getElementById('ch-daily').addEventListener('click', e => { const g = e.target.closest('[data-d]'); if (!g) return; TL.date = g.dataset.d; tlDraw(); document.getElementById('tl-panel').scrollIntoView({behavior: 'smooth', block: 'start'}); });
   document.getElementById('tl-flags').addEventListener('click', e => { const b = e.target.closest('[data-tld]'); if (b) { TL.date = b.dataset.tld; tlDraw(); } });
-  document.getElementById('tl-plyo').addEventListener('click', async e => { const b = e.target.closest('[data-tlsave]'); if (!b) return; const k = b.dataset.tlsave, box = document.getElementById('tl-plyo');
-    const st = box.querySelector(`[data-tls="${k}"]`).value, en = box.querySelector(`[data-tle="${k}"]`).value, msg = document.getElementById('tl-note'), id = TL.date + '|' + k;
+  tlPlyoWire('tl');
+}
+function tlPlyoWire(w) {
+  const box = tlEl(w, 'plyo'); if (!box || box.dataset.wired) return; box.dataset.wired = '1';
+  box.addEventListener('click', async e => { const b = e.target.closest('[data-tlsave]'); if (!b) return; const k = b.dataset.tlsave, d = box.dataset.d;
+    const st = box.querySelector(`[data-tls="${k}"]`).value, en = box.querySelector(`[data-tle="${k}"]`).value, msg = tlEl(w, 'note'), id = d + '|' + k;
     if (!db) { msg.textContent = 'Plyo times can only be saved when signed in.'; return; }
-    try { if (!st) await db.collection(col('activityTimes')).doc(id).delete(); else await db.collection(col('activityTimes')).doc(id).set({date: TL.date, activity: k, start: st, end: en || st});
-      if (!st) ACT_TIMES.delete(id); else ACT_TIMES.set(id, {date: TL.date, activity: k, start: st, end: en || st}); tlDraw(); tlFlags(); }
+    try { if (!st) await db.collection(col('activityTimes')).doc(id).delete(); else await db.collection(col('activityTimes')).doc(id).set({date: d, activity: k, start: st, end: en || st});
+      if (!st) ACT_TIMES.delete(id); else ACT_TIMES.set(id, {date: d, activity: k, start: st, end: en || st}); tlRedraw(); if (w === 'tl') tlFlags(); }
     catch (er) { msg.textContent = 'Could not save the plyo times: ' + (er.message || er); } });
 }
+function tlRedraw() { if (S.view === 'explore') tlDraw(); if (S.view === 'player' && !PV.reporting && PV.mode === 'day' && document.getElementById('pv-tl-ch')) tlDraw('pv', PV.date); }
 function tlFlags() { // days in the selected range with a rest shorter than its minimum
   const el = document.getElementById('tl-flags'); if (!TL.lo) return; const ds = [...new Set(throws.filter(t => t[0] >= TL.lo && t[0] <= TL.hi && tlSecs(t[1]) !== null).map(t => t[0]))].sort();
   const bad = ds.map(d => ({d, n: tlBuild(d).acts.filter(a => a.short).length})).filter(x => x.n);
   el.innerHTML = !ds.length ? '' : bad.length ? `<span class="pill warn">Rest under the minimum on ${bad.length} day${bad.length === 1 ? '' : 's'}:</span> ${bad.slice(0, 10).map(x => `<button type="button" class="linkbtn" data-tld="${x.d}">${short(x.d)}</button>`).join(' ')}${bad.length > 10 ? ` and ${bad.length - 10} more` : ''}` : `<span class="pill good">Rest met the minimums on all ${ds.length} timed days</span>`;
 }
-function tlDraw() {
-  const ch = document.getElementById('ch-tl'); if (!ch || !TL.date) return; const d = TL.date; document.getElementById('tl-date').value = d;
-  const B_ = tlBuild(d), acts = B_.acts, note = document.getElementById('tl-note');
+function tlDraw(w = 'tl', dd) {
+  const ch = tlEl(w, 'ch'), d = w === 'tl' ? TL.date : dd; if (!ch || !d) return; if (w === 'tl') tlEl(w, 'date').value = d;
+  const B_ = tlBuild(d), acts = B_.acts, note = tlEl(w, 'note'); const where = w;
   const mx = S.max || 95, col = c => `var(--c-${c})`;
   // panels: one per activity, one per inning in a game; width follows the number of throws
   const panels = []; acts.forEach((a, ai) => { if (a.k === 'game' && a.innings && a.innings.length) a.innings.forEach((g, gi) => panels.push({a, g, label: `Inn ${g.n} · ${g.pitches} P`, start: g.start, end: g.end, th: g.th, rest: gi ? g.rest : a.rest, short: gi ? false : a.short, rule: gi ? null : a.rule, first: !gi && ai > 0}));
     else panels.push({a, label: a.typed ? (a.plyoN ? `${a.label} · ${a.plyoN}` : a.label) : a.label, start: a.start, end: a.end, th: a.th, rest: a.rest, short: a.short, rule: a.rule, first: ai > 0}); });
-  if (!panels.length) { ch.innerHTML = `<p class="muted" style="padding:18px 4px">No throws with clock times on ${tlLong(d)}.${B_.untimed ? ` ${B_.untimed} throws that day have no full time (from the old sheets).` : ''}</p>`; document.getElementById('tl-table').innerHTML = ''; tlPlyoBox(d, B_); note.textContent = ''; return; }
-  const W = isNarrow() ? 700 : 1100, H = 300, m = {l: 40, r: 10, t: 48, b: 46}, GAP = 54;
+  if (!panels.length) { ch.innerHTML = `<p class="muted" style="padding:18px 4px">No throws with clock times on ${tlLong(d)}.${B_.untimed ? ` ${B_.untimed} throws that day have no full time (from the old sheets).` : ''}</p>`; tlEl(w, 'table').innerHTML = ''; tlPlyoBox(d, B_, w); note.textContent = ''; return; }
+  const W = w === 'pv' ? 760 : isNarrow() ? 700 : 1100, H = 300, m = {l: 40, r: 10, t: 48, b: 46}, GAP = 54;
   const wts = panels.map(p => Math.max(8, p.th.length || 14)), tot = wts.reduce((s, v) => s + v, 0), avail = W - m.l - m.r - GAP * (panels.length - 1);
   const y = v => H - m.b - Math.max(0, Math.min(110, v)) / 110 * (H - m.t - m.b);
   let x0 = m.l, out = '';
@@ -1409,12 +1419,12 @@ function tlDraw() {
     const span = Math.max(1, p.end - p.start), xs = t => x0 + 4 + (w - 8) * (p.th.length > 1 ? (t - p.start) / span : 0.5);
     out += `<text class="tlh" x="${x0 + w / 2}" y="${m.t - 26}" text-anchor="middle">${esc(p.label)}</text><text class="tlt" x="${x0 + w / 2}" y="${m.t - 12}" text-anchor="middle">${tlHM(p.start)}${p.end > p.start + 30 ? '–' + tlHM(p.end) : ''}</text>`;
     out += `<line x1="${x0}" x2="${x0 + w}" y1="${H - m.b}" y2="${H - m.b}" stroke="var(--ink)" stroke-width="1.2"/>`;
-    if (!p.th.length) out += `<rect x="${x0 + 2}" y="${y(45)}" width="${w - 4}" height="${y(0) - y(45)}" fill="url(#tlh-${p.a.k})" stroke="${col('plyo_hi')}" stroke-opacity=".5"/>${w > 80 ? `<text class="tlt" x="${x0 + w / 2}" y="${y(22)}" text-anchor="middle">typed times</text>` : ''}`;
+    if (!p.th.length) out += `<rect x="${x0 + 2}" y="${y(45)}" width="${w - 4}" height="${y(0) - y(45)}" fill="url(#tlh-${where}-${p.a.k})" stroke="${col('plyo_hi')}" stroke-opacity=".5"/>${w > 80 ? `<text class="tlt" x="${x0 + w / 2}" y="${y(22)}" text-anchor="middle">typed times</text>` : ''}`;
     (p.a.pauses || []).filter(z => z.at >= p.start && z.at < p.end).forEach(z => { const px = (xs(z.at) + xs(z.at + z.len)) / 2; out += `<text class="tlt" x="${px}" y="${y(106)}" text-anchor="middle">pause ${tlDur(z.len)}</text>`; });
     p.th.forEach(t => { const cx = xs(t.x), pc = t.v ? t.v / mx * 100 : 0; const c = col(t.c);
       out += `<g><title>${tlHM(t.x).replace(' ', ':' + String(Math.floor(t.x % 60)).padStart(2, '0') + ' ')} · ${esc(CTX_BY[t.c] ? CTX_BY[t.c].short : t.c)}${t.v ? ' · ' + fmt(t.v, 1) + ' mph' : ''}${t.pt ? ' · ' + esc(t.pt) : ''}</title><line x1="${cx}" x2="${cx}" y1="${y(0)}" y2="${y(pc)}" stroke="var(--line)" stroke-width="1.1"/>${t.wu ? `<circle cx="${cx}" cy="${y(pc)}" r="2.9" fill="var(--panel, #fff)" stroke="${c}" stroke-width="1.6"/>` : `<circle cx="${cx}" cy="${y(pc)}" r="3.4" fill="${c}"/>`}</g>`; });
     x0 += w + GAP; });
-  const defs = `<defs>${['plyo_wu', 'plyo_hi'].map(k => `<pattern id="tlh-${k}" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--c-${k})" fill-opacity=".18"/><line x1="0" y1="0" x2="0" y2="6" stroke="var(--c-${k})" stroke-width="2"/></pattern>`).join('')}</defs>`;
+  const defs = `<defs>${['plyo_wu', 'plyo_hi'].map(k => `<pattern id="tlh-${where}-${k}" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--c-${k})" fill-opacity=".18"/><line x1="0" y1="0" x2="0" y2="6" stroke="var(--c-${k})" stroke-width="2"/></pattern>`).join('')}</defs>`;
   ch.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Throw timeline for ${tlLong(d)}">${defs}${out}</svg>`;
   // table
   const rows = []; acts.forEach((a, ai) => {
@@ -1423,13 +1433,22 @@ function tlDraw() {
     rows.push(`<tr><td><i class="swatch" style="background:${col(a.k === 'cp' ? 'cp' : a.k === 'mound' ? 'mp' : a.k === 'gbullpen' ? 'gbp' : a.k === 'game' ? 'gp' : a.k)}"></i> <b>${esc(a.label)}</b></td><td>${tlHM(a.start)}</td><td>${tlHM(a.end)}</td><td>${tlDur(a.end - a.start)}</td><td class="n">${a.typed ? '–' : warm || '–'}</td><td class="n">${a.typed ? (a.plyoN || '–') : `<b>${main}</b>`}</td><td class="n">${vs.length ? fmt(Math.max(...vs), 1) : '–'}</td>${restCell}<td></td></tr>`);
     if (a.innings) a.innings.forEach(g => rows.push(`<tr class="inn"><td>Inning ${g.n}</td><td>${tlHM(g.start)}</td><td>${tlHM(g.end)}</td><td>${tlDur(g.end - g.start)}</td><td class="n">${g.warm}</td><td class="n"><b>${g.pitches}</b></td><td class="n">${g.vlo !== null ? `${fmt(g.vlo, 1)}–${fmt(g.vhi, 1)}${g.fbOnly ? ' FB' : ''}` : '–'}</td><td>${g.rest !== null ? tlDur(g.rest) : '–'}</td><td></td><td class="n">${g.tempo !== null ? fmt(g.tempo, 1) + 's' : '–'}</td></tr>`));
   });
-  document.getElementById('tl-table').innerHTML = `<thead><tr><th>Activity</th><th>Start</th><th>End</th><th>Length</th><th class="n">Warm-ups</th><th class="n">Pitches / throws</th><th class="n">Top mph (innings: range)</th><th>Rest before</th><th>Minimum</th><th class="n">Tempo</th></tr></thead><tbody>${rows.join('')}</tbody>`;
-  tlPlyoBox(d, B_);
+  if (w === 'pv') { // phone: activity, time, warm-ups, pitches, rest
+    const rr = []; acts.forEach((a, ai) => { const warm = a.th.filter(t => t.wu).length, main = a.th.length - warm;
+      rr.push(`<tr><td><b>${esc(a.label)}</b></td><td>${tlSpan(a.start, a.end)}</td><td class="n">${a.typed ? '–' : warm || '–'}</td><td class="n"><b>${a.typed ? (a.plyoN || '–') : main}</b></td><td class="${a.short ? 'bad' : a.rule ? 'ok' : ''}">${ai ? tlDur(a.rest) + (a.short ? ' ⚠' : '') + (a.rule ? `<br><small class="muted">min ${a.rule.min}m</small>` : '') : '–'}</td></tr>`);
+      if (a.innings) a.innings.forEach(g => rr.push(`<tr class="inn"><td>Inning ${g.n}</td><td>${tlSpan(g.start, g.end)}</td><td class="n">${g.warm}</td><td class="n"><b>${g.pitches}</b></td><td>${g.rest !== null ? tlDur(g.rest) : '–'}</td></tr>`)); });
+    tlEl(w, 'table').innerHTML = `<thead><tr><th>Activity</th><th>Time</th><th class="n">W-up</th><th class="n">Pitches</th><th>Rest</th></tr></thead><tbody>${rr.join('')}</tbody>`;
+    tlPlyoBox(d, B_, w);
+    note.innerHTML = `Rest = time from the last throw of one activity to the first throw of the next.${B_.untimed ? ` ${B_.untimed} throws this day have no clock time and aren't shown.` : ''}`;
+    return;
+  }
+  tlEl(w, 'table').innerHTML = `<thead><tr><th>Activity</th><th>Start</th><th>End</th><th>Length</th><th class="n">Warm-ups</th><th class="n">Pitches / throws</th><th class="n">Top mph (innings: range)</th><th>Rest before</th><th>Minimum</th><th class="n">Tempo</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  tlPlyoBox(d, B_, w);
   const rules = REST_RULES.filter(r => r.role === (S.role || 'starter') || r.role === 'all');
   note.innerHTML = `Rest = time from the last throw of one activity to the first throw of the next; for innings it is the recovery since the previous inning's last pitch. Tempo = average seconds between pitches. ${rules.length ? `Minimums for a ${esc(S.role || 'starter')} (Master → RestRules): ${rules.map(r => `${TL_GROUPS[r.from]} → ${TL_GROUPS[r.to]} ${r.min} min`).join(' · ')}.` : `No minimum rest set for a ${esc(S.role || 'starter')} yet (Master → RestRules).`}${B_.untimed ? ` ${B_.untimed} throws this day have no full time (old sheets) and are not on the timeline.` : ''}`;
 }
-function tlPlyoBox(d, B_) {
-  const box = document.getElementById('tl-plyo'); const hm = v => s_(v).slice(0, 5);
+function tlPlyoBox(d, B_, w = 'tl') {
+  const box = tlEl(w, 'plyo'); box.dataset.d = d; tlPlyoWire(w); const hm = v => s_(v).slice(0, 5);
   box.innerHTML = `<b>Plyo times</b>` + ['plyo_wu', 'plyo_hi'].map(k => { const r = ACT_TIMES.get(d + '|' + k) || {}; return `<span>${TL_LABEL[k]}${B_.plyoCounts[k] ? ` (${B_.plyoCounts[k]})` : ''}: <input type="time" data-tls="${k}" value="${hm(r.start)}" aria-label="${TL_LABEL[k]} start"> to <input type="time" data-tle="${k}" value="${hm(r.end)}" aria-label="${TL_LABEL[k]} end"> <button type="button" data-tlsave="${k}">Save</button></span>`; }).join('') + `<span class="muted">Clear the start time and save to remove.</span>`;
 }
 
@@ -3344,7 +3363,7 @@ async function connectStore() {
     schedule = new Map(snap.docs.filter(d => d.exists && d.data().label).map(d => [d.id, String(d.data().label)]));
     if (S.view === 'explore') renderExplore();
   }, () => {});
-  try { db.collection(col('activityTimes')).onSnapshot(snap => { ACT_TIMES = new Map(snap.docs.filter(d => d.exists).map(d => [d.id, d.data()])); if (S.view === 'explore') tlDraw(); }, () => {}); } catch (e) {}
+  try { db.collection(col('activityTimes')).onSnapshot(snap => { ACT_TIMES = new Map(snap.docs.filter(d => d.exists).map(d => [d.id, d.data()])); tlRedraw(); }, () => {}); } catch (e) {}
   db.collection(col('modeTargets')).onSnapshot(snap => {
     modeTargets = snap.docs.filter(d => d.exists).map(d => ({id: d.id, ...d.data()})).filter(t => t.cat && t.from && typeof t.mph === 'number');
     if (S.view === 'explore') { const lo = S.ex.from <= S.ex.to ? S.ex.from : S.ex.to, hi = S.ex.from <= S.ex.to ? S.ex.to : S.ex.from; drawMode(dateRange(lo, hi)); } else renderTargets();
@@ -3468,6 +3487,16 @@ function drawPlayerCharts() {
 function renderPlayer() {
   PLAYER_MODE = true; try { renderPlayerInner(); } finally { PLAYER_MODE = false; }
 }
+/* the day's timeline on the player screen: only for a day that has happened */
+function pvTimelineHTML(d) {
+  if (d > pvToday()) return '';
+  const has = tlHasTimes(d) || ACT_TIMES.has(d + '|plyo_wu') || ACT_TIMES.has(d + '|plyo_hi'), any = throws.some(t => t[0] === d) || (D.days.find(x => x.date === d) || {}).plyos;
+  if (!has && !any) return '';
+  return `<div class="pv-card pv-tl"><div class="pv-ch-h"><b>Day timeline</b><span class="muted">start, end and rest between activities</span></div>
+    <div class="pv-tlscroll"><div id="pv-tl-ch"></div></div>
+    <div class="legend" style="margin-top:4px"><span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="var(--c-gp)"/></svg>Pitch / main throw</span><span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="3.6" fill="none" stroke="var(--c-gw)" stroke-width="1.6"/></svg>Warm-up</span></div>
+    <div class="tablewrap"><table id="pv-tl-table"></table></div><div id="pv-tl-plyo" class="tlplyo"></div><p class="note" id="pv-tl-note"></p></div>`;
+}
 function renderPlayerInner() {
   const el = document.getElementById('pv'); if (!el) return;
   const d = PV.date || (PV.date = pvToday());
@@ -3515,10 +3544,10 @@ function renderPlayerInner() {
       ${rep0 ? `<div><b>✓ ${rep0.noThrow ? 'You logged no throwing' : `You reported ${rep0.items.reduce((s, r) => s + (+r.n || 0), 0)} throws`}</b> <span class="muted">· ${esc(rep0.when || '')}</span></div>${feelLine(rep0)}` : `<div class="muted">${d > pvToday() ? 'You can report this day once it happens.' : 'No report yet for this day.'}</div>`}
       ${meas ? `<div class="pv-meas">Measured by radar/Trackman: <b>${meas.n}</b> throws</div>` : ''}
       ${d <= pvToday() ? `<button type="button" class="primary pv-big" id="pv-report">${rep0 ? 'Edit my report' : today ? "Log today's throwing" : 'Log this day'}</button>` : ''}
-    </div>`}${PV.reporting ? '' : pvChartsHTML()}`;
+    </div>`}${PV.reporting ? '' : pvTimelineHTML(d)}${PV.reporting ? '' : pvChartsHTML()}`;
   el.querySelectorAll('[data-pvm]').forEach(b => b.onclick = () => { PV.mode = b.dataset.pvm; if (PV.mode === 'month') PV.month = d.slice(0, 7); renderPlayer(); });
   el.querySelectorAll('[data-pvlog]').forEach(b => b.onclick = () => { PV.date = b.dataset.pvlog; PV.reporting = true; PV.draft = null; PV.feel = null; renderPlayer(); el.querySelector('.pv-form')?.scrollIntoView({block: 'start'}); });
-  if (!PV.reporting) drawPlayerCharts();
+  if (!PV.reporting) { drawPlayerCharts(); if (document.getElementById('pv-tl-ch')) tlDraw('pv', d); }
   const go = x => { PV.date = x; PV.reporting = false; PV.draft = null; PV.feel = null; PV.feel = null; renderPlayer(); };
   el.querySelector('#pv-prev').onclick = () => go(addDays(d, -1));
   el.querySelector('#pv-next').onclick = () => go(addDays(d, 1));
