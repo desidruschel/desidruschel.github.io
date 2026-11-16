@@ -535,6 +535,12 @@ td.sr-ok { color: var(--good); font-weight: 600; } td.sr-mid { color: var(--warn
 /* pilot site, player sign-in: only their own Player screen */
 body.live-player nav.tabs, body.live-player .ctrls, body.live-player #ctrls-toggle, body.live-player .pv-preview, body.live-player #master-status, body.live-player #sched-status, body.live-player #meta, body.live-player .pswitch { display: none !important; }
 body.live .pv-preview { display: none; }
+.linkbtn{background:none;border:0;padding:0 2px;color:var(--accent);text-decoration:underline;cursor:pointer;font:inherit}
+.tlnav{display:flex;gap:4px;align-items:center}.tlnav button{padding:2px 9px}
+#ch-tl svg{width:100%;height:auto;display:block}#ch-tl .tlh{font:600 11.5px var(--font,inherit);fill:var(--ink)}#ch-tl .tlt{font-size:10px;fill:var(--muted)}
+#ch-tl .tlr{font-size:10.5px;fill:var(--muted)}#ch-tl .tlbad{fill:var(--bad);font-weight:700}
+#tl-table td.bad{color:var(--bad);font-weight:600}#tl-table td.ok{color:var(--good)}#tl-table tr.inn td:first-child{padding-left:18px}
+.tlplyo{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-top:10px;font-size:13px}.tlplyo input[type=time]{width:110px}
 </style>
 
 <header class="top">
@@ -613,6 +619,15 @@ body.live .pv-preview { display: none; }
     <div class="panel">
       <div class="panel-head tight"><div class="ph-left"><h2>Daily workload</h2><div class="acalert" id="ac-alert"></div></div><details class="keydd"><summary>Key</summary><div class="legend" id="lg-daily"></div></details></div>
       <div class="chart" id="ch-daily"></div>
+      <p class="note">Click a day's bar to open its timeline below.</p>
+    </div>
+    <div class="panel" id="tl-panel">
+      <div class="panel-head tight"><div class="ph-left"><h2>Day timeline</h2><div class="acalert" id="tl-flags"></div></div>
+        <div class="tlnav"><button type="button" id="tl-prev" title="Previous day with timed throws">‹</button><input type="date" id="tl-date" aria-label="Timeline day"><button type="button" id="tl-next" title="Next day with timed throws">›</button></div></div>
+      <div class="chart" id="ch-tl"></div>
+      <div class="tablewrap"><table id="tl-table"></table></div>
+      <div id="tl-plyo" class="tlplyo"></div>
+      <p class="note" id="tl-note"></p>
     </div>
     <div class="panel">
       <div class="panel-head tight"><h2>Daily throws</h2><details class="keydd"><summary>Key</summary><div class="legend" id="lg-throws"></div></details></div>
@@ -1302,8 +1317,121 @@ function renderExplore() {
   tbl.innerHTML = sel.length ? head + `<tbody>${keys.map(k => row(k, stat(groups.get(k)))).join('')}${keys.length > 1 ? row('All days', stat(sel), 'total') : ''}</tbody>` : `<tbody><tr><td class="muted">No days match these filters. Widen the dates or tick more day types or throw types.</td></tr></tbody>`;
   bindTips(tbl);
   renderReportAccuracy(lo, hi);
-  drawDaily(dates, sel); drawThrows(dates, sel); drawWeekly(lo, hi); drawVelo(dates, sel); renderPitchTable(lo, hi); renderBucketTable(lo, hi); drawMode(dates);
+  drawDaily(dates, sel); tlRange(lo, hi); drawThrows(dates, sel); drawWeekly(lo, hi); drawVelo(dates, sel); renderPitchTable(lo, hi); renderBucketTable(lo, hi); drawMode(dates);
 }
+// ---------- Day timeline: each activity's start, end and the rest between them ----------
+// Throws with a full clock time (h:mm:ss) are grouped into activities: catch play, bullpen (side or game bullpen), game warm-ups and innings.
+// Plyos have no clock times, so their start and end are typed in (activityTimes collection). Minimum rest comes from Master → RestRules.
+let REST_RULES = [{role: 'starter', from: 'plyo_wu', to: 'cp', min: 2}, {role: 'starter', from: 'cp', to: 'plyo_hi', min: 4}, {role: 'starter', from: 'plyo_hi', to: 'bullpen', min: 2}, {role: 'starter', from: 'bullpen', to: 'game', min: 6}];
+let ACT_TIMES = new Map();
+const tlLong = d => `${DOW[dow(d)]} ${nice(d)}, ${d.slice(0, 4)}`;
+const TL = {date: null, lo: null, hi: null};
+const TL_GROUPS = {plyo_wu: 'Plyo warmup', cp: 'Catch play', plyo_hi: 'Plyo high', bullpen: 'Bullpen', game: 'Game'};
+function tlGroupKey(v) { const t = s_(v).toLowerCase(); return /plyo.*(warm|wu)/.test(t) ? 'plyo_wu' : /plyo.*(high|hi)/.test(t) ? 'plyo_hi' : /catch|^cp$/.test(t) ? 'cp' : /bullpen|side|mound/.test(t) ? 'bullpen' : /game/.test(t) ? 'game' : ''; }
+const tlSecs = t => { const m = /^(\d{1,2}):(\d\d):(\d\d(?:\.\d+)?)/.exec(s_(t)); return m && +m[1] < 24 ? +m[1] * 3600 + +m[2] * 60 + +m[3] : null; };
+const tlHM = x => { if (x === null || x === undefined) return '–'; x = Math.round(x); const h = Math.floor(x / 3600) % 24, mi = Math.floor(x % 3600 / 60); return `${h % 12 || 12}:${String(mi).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+const tlDur = x => { x = Math.max(0, Math.round(x)); const m = Math.floor(x / 60), sec = x % 60; return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : m ? `${m}m${sec ? ' ' + sec + 's' : ''}` : `${sec}s`; };
+const tlHasTimes = d => throws.some(t => t[0] === d && tlSecs(t[1]) !== null);
+const TL_KIND = {cp: 'cp', mw: 'mound', mp: 'mound', gbw: 'gbullpen', gbp: 'gbullpen', gw: 'game', gp: 'game'};
+const TL_LABEL = {plyo_wu: 'Plyo warmup', cp: 'Catch play', plyo_hi: 'Plyo high', mound: 'Bullpen (side / T&F)', gbullpen: 'Game bullpen', game: 'Game'};
+const TL_RULEKEY = {plyo_wu: 'plyo_wu', cp: 'cp', plyo_hi: 'plyo_hi', mound: 'bullpen', gbullpen: 'bullpen', game: 'game', inning: 'game'};
+function tlRule(a, b) { const role = S.role || 'starter'; const f = TL_RULEKEY[a], t = TL_RULEKEY[b]; return REST_RULES.find(r => r.from === f && r.to === t && r.role === role) || REST_RULES.find(r => r.from === f && r.to === t && r.role === 'all') || null; }
+/* one day's activities, in time order */
+function tlBuild(d) {
+  const day = throws.filter(t => t[0] === d), timed = [], untimed = [];
+  for (const t of day) { const c = REMAP[t[3]] || t[3], k = TL_KIND[c], x = tlSecs(t[1]); if (!k) continue; (x === null ? untimed : timed).push({x, c, k, v: t[4], pt: t[5], wu: /w$/.test(c)}); }
+  timed.sort((a, b) => a.x - b.x);
+  const acts = [];
+  for (const t of timed) { // a new activity when the kind changes, or after 20 minutes without a throw (a game stays one activity)
+    let a = acts[acts.length - 1];
+    if (!a || a.k !== t.k || (t.k !== 'game' && t.x - a.end > 1200)) { a = {k: t.k, label: TL_LABEL[t.k], start: t.x, end: t.x, th: []}; acts.push(a); }
+    a.th.push(t); a.end = t.x; }
+  for (const a of acts) { // pauses inside an activity (anthem, a mound visit): 3 minutes or more
+    a.pauses = []; for (let i = 1; i < a.th.length; i++) if (a.th[i].x - a.th[i - 1].x >= 180) a.pauses.push({at: a.th[i - 1].x, len: a.th[i].x - a.th[i - 1].x});
+    if (a.k === 'game') { // innings: warm-ups then pitches; a warm-up after a pitch, or a 5-minute gap, starts the next inning
+      const inn = []; let cur = null, sawPitch = false;
+      for (const t of a.th) { if (!cur || (t.wu && sawPitch) || (!t.wu && sawPitch && t.x - cur.end >= 300)) { cur = {th: [], start: t.x, end: t.x}; inn.push(cur); sawPitch = false; } cur.th.push(t); cur.end = t.x; if (!t.wu) sawPitch = true; }
+      // pre-game warm-ups well before the first inning stay their own block
+      if (inn.length > 1 && inn[0].th.every(t => t.wu)) { inn[1].th = inn[0].th.concat(inn[1].th); inn[1].start = inn[0].start; inn.shift(); }
+      a.innings = inn.map((g, i) => { const p = g.th.filter(t => !t.wu), w = g.th.filter(t => t.wu); const gaps = []; for (let j = 1; j < p.length; j++) { const dx = p[j].x - p[j - 1].x; if (dx < 120) gaps.push(dx); }
+        const fb = p.filter(t => /fast|four|sink|two|seam/i.test(t.pt || '') && t.v); const vs = (fb.length ? fb : p.filter(t => t.v)).map(t => t.v);
+        return {n: i + 1, start: g.start, end: g.end, pStart: p.length ? p[0].x : null, warm: w.length, pitches: p.length, tempo: gaps.length ? gaps.reduce((s, v) => s + v, 0) / gaps.length : null, vlo: vs.length ? Math.min(...vs) : null, vhi: vs.length ? Math.max(...vs) : null, fbOnly: !!fb.length, th: g.th}; });
+      a.innings.forEach((g, i) => { g.rest = i ? g.start - a.innings[i - 1].end : null; }); } }
+  // plyos: typed-in times
+  const dy = D.days.find(x => x.date === d) || {}; const pc = {plyo_wu: 0, plyo_hi: 0}; (dy.plyos || []).forEach(p => { pc[plyoCat(p)] += +p[1] || 0; });
+  for (const k of ['plyo_wu', 'plyo_hi']) { const r = ACT_TIMES.get(d + '|' + k); const st = r && tlSecs(r.start + (/:\d\d:/.test(r.start) ? '' : ':00')), en = r && tlSecs(r.end + (/:\d\d:/.test(r.end || '') ? '' : ':00'));
+    if (st !== null && st !== undefined) acts.push({k, label: TL_LABEL[k], start: st, end: en !== null && en !== undefined && en >= st ? en : st, th: [], plyoN: pc[k], typed: true, pauses: []}); }
+  acts.sort((a, b) => a.start - b.start);
+  acts.forEach((a, i) => { if (!i) return; const p = acts[i - 1]; a.rest = a.start - p.end; a.rule = tlRule(p.k, a.k); a.short = a.rule && a.rest < a.rule.min * 60; });
+  return {acts, untimed: untimed.length, plyoCounts: pc};
+}
+function tlRange(lo, hi) { TL.lo = lo; TL.hi = hi; if (!TL.date || TL.date < lo || TL.date > hi) { const ds = [...new Set(throws.filter(t => t[0] >= lo && t[0] <= hi && tlSecs(t[1]) !== null).map(t => t[0]))].sort(); TL.date = ds.length ? ds[ds.length - 1] : hi; } tlWire(); tlDraw(); tlFlags(); }
+let tlWired = false;
+function tlWire() {
+  if (tlWired) return; tlWired = true;
+  const step = dir => { const ds = [...new Set(throws.filter(t => tlSecs(t[1]) !== null).map(t => t[0]))].sort(); const i = dir > 0 ? ds.find(x => x > TL.date) : [...ds].reverse().find(x => x < TL.date); if (i) { TL.date = i; tlDraw(); } };
+  document.getElementById('tl-prev').addEventListener('click', () => step(-1)); document.getElementById('tl-next').addEventListener('click', () => step(1));
+  document.getElementById('tl-date').addEventListener('change', e => { if (e.target.value) { TL.date = e.target.value; tlDraw(); } });
+  document.getElementById('ch-daily').addEventListener('click', e => { const g = e.target.closest('[data-d]'); if (!g) return; TL.date = g.dataset.d; tlDraw(); document.getElementById('tl-panel').scrollIntoView({behavior: 'smooth', block: 'start'}); });
+  document.getElementById('tl-flags').addEventListener('click', e => { const b = e.target.closest('[data-tld]'); if (b) { TL.date = b.dataset.tld; tlDraw(); } });
+  document.getElementById('tl-plyo').addEventListener('click', async e => { const b = e.target.closest('[data-tlsave]'); if (!b) return; const k = b.dataset.tlsave, box = document.getElementById('tl-plyo');
+    const st = box.querySelector(`[data-tls="${k}"]`).value, en = box.querySelector(`[data-tle="${k}"]`).value, msg = document.getElementById('tl-note'), id = TL.date + '|' + k;
+    if (!db) { msg.textContent = 'Plyo times can only be saved when signed in.'; return; }
+    try { if (!st) await db.collection(col('activityTimes')).doc(id).delete(); else await db.collection(col('activityTimes')).doc(id).set({date: TL.date, activity: k, start: st, end: en || st});
+      if (!st) ACT_TIMES.delete(id); else ACT_TIMES.set(id, {date: TL.date, activity: k, start: st, end: en || st}); tlDraw(); tlFlags(); }
+    catch (er) { msg.textContent = 'Could not save the plyo times: ' + (er.message || er); } });
+}
+function tlFlags() { // days in the selected range with a rest shorter than its minimum
+  const el = document.getElementById('tl-flags'); if (!TL.lo) return; const ds = [...new Set(throws.filter(t => t[0] >= TL.lo && t[0] <= TL.hi && tlSecs(t[1]) !== null).map(t => t[0]))].sort();
+  const bad = ds.map(d => ({d, n: tlBuild(d).acts.filter(a => a.short).length})).filter(x => x.n);
+  el.innerHTML = !ds.length ? '' : bad.length ? `<span class="pill warn">Rest under the minimum on ${bad.length} day${bad.length === 1 ? '' : 's'}:</span> ${bad.slice(0, 10).map(x => `<button type="button" class="linkbtn" data-tld="${x.d}">${short(x.d)}</button>`).join(' ')}${bad.length > 10 ? ` and ${bad.length - 10} more` : ''}` : `<span class="pill good">Rest met the minimums on all ${ds.length} timed days</span>`;
+}
+function tlDraw() {
+  const ch = document.getElementById('ch-tl'); if (!ch || !TL.date) return; const d = TL.date; document.getElementById('tl-date').value = d;
+  const B_ = tlBuild(d), acts = B_.acts, note = document.getElementById('tl-note');
+  const mx = S.max || 95, col = c => `var(--c-${c})`;
+  // panels: one per activity, one per inning in a game; width follows the number of throws
+  const panels = []; acts.forEach((a, ai) => { if (a.k === 'game' && a.innings && a.innings.length) a.innings.forEach((g, gi) => panels.push({a, g, label: `Inn ${g.n}`, start: g.start, end: g.end, th: g.th, rest: gi ? g.rest : a.rest, short: gi ? false : a.short, rule: gi ? null : a.rule, first: !gi && ai > 0}));
+    else panels.push({a, label: a.typed ? (a.plyoN ? `${a.label} · ${a.plyoN}` : a.label) : a.label, start: a.start, end: a.end, th: a.th, rest: a.rest, short: a.short, rule: a.rule, first: ai > 0}); });
+  if (!panels.length) { ch.innerHTML = `<p class="muted" style="padding:18px 4px">No throws with clock times on ${tlLong(d)}.${B_.untimed ? ` ${B_.untimed} throws that day have no full time (from the old sheets).` : ''}</p>`; document.getElementById('tl-table').innerHTML = ''; tlPlyoBox(d, B_); note.textContent = ''; return; }
+  const W = isNarrow() ? 700 : 1100, H = 300, m = {l: 40, r: 10, t: 48, b: 46}, GAP = 54;
+  const wts = panels.map(p => Math.max(8, p.th.length || 14)), tot = wts.reduce((s, v) => s + v, 0), avail = W - m.l - m.r - GAP * (panels.length - 1);
+  const y = v => H - m.b - Math.max(0, Math.min(110, v)) / 110 * (H - m.t - m.b);
+  let x0 = m.l, out = '';
+  [0, 25, 50, 75, 100].forEach(v => { out += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1" opacity=".6"/><text class="tlt" x="${m.l - 6}" y="${y(v) + 3}" text-anchor="end">${v}</text>`; });
+  out += `<text class="tlt" transform="translate(11 ${(m.t + H - m.b) / 2}) rotate(-90)" text-anchor="middle">% of max velo</text>`;
+  panels.forEach((p, i) => {
+    const w = avail * wts[i] / tot;
+    if (i) { const gx = x0 - GAP, bad = p.short; const txt = p.rest === null || p.rest === undefined ? '' : tlDur(p.rest);
+      out += `<rect x="${gx + 3}" y="${m.t}" width="${GAP - 6}" height="${H - m.t - m.b}" fill="${bad ? 'var(--bad)' : 'var(--ink)'}" opacity="${bad ? .1 : .035}" rx="3"/>`;
+      out += `<text class="tlr${bad ? ' tlbad' : ''}" x="${gx + GAP / 2}" y="${m.t + 22}" text-anchor="middle">${p.first ? 'Rest' : 'Recov.'}</text><text class="tlr${bad ? ' tlbad' : ''}" x="${gx + GAP / 2}" y="${m.t + 36}" text-anchor="middle">${txt}</text>${p.rule ? `<text class="tlt" x="${gx + GAP / 2}" y="${m.t + 50}" text-anchor="middle">min ${p.rule.min}m</text>` : ''}`; }
+    const span = Math.max(1, p.end - p.start), xs = t => x0 + 4 + (w - 8) * (p.th.length > 1 ? (t - p.start) / span : 0.5);
+    out += `<text class="tlh" x="${x0 + w / 2}" y="${m.t - 26}" text-anchor="middle">${esc(p.label)}</text><text class="tlt" x="${x0 + w / 2}" y="${m.t - 12}" text-anchor="middle">${tlHM(p.start)}${p.end > p.start + 30 ? '–' + tlHM(p.end) : ''}</text>`;
+    out += `<line x1="${x0}" x2="${x0 + w}" y1="${H - m.b}" y2="${H - m.b}" stroke="var(--ink)" stroke-width="1.2"/>`;
+    if (!p.th.length) out += `<rect x="${x0 + 2}" y="${y(45)}" width="${w - 4}" height="${y(0) - y(45)}" fill="url(#tlh-${p.a.k})" stroke="${col('plyo_hi')}" stroke-opacity=".5"/>${w > 80 ? `<text class="tlt" x="${x0 + w / 2}" y="${y(22)}" text-anchor="middle">typed times</text>` : ''}`;
+    (p.a.pauses || []).filter(z => z.at >= p.start && z.at < p.end).forEach(z => { const px = (xs(z.at) + xs(z.at + z.len)) / 2; out += `<text class="tlt" x="${px}" y="${y(106)}" text-anchor="middle">pause ${tlDur(z.len)}</text>`; });
+    p.th.forEach(t => { const cx = xs(t.x), pc = t.v ? t.v / mx * 100 : 0; const c = col(t.c);
+      out += `<g><title>${tlHM(t.x).replace(' ', ':' + String(Math.floor(t.x % 60)).padStart(2, '0') + ' ')} · ${esc(CTX_BY[t.c] ? CTX_BY[t.c].short : t.c)}${t.v ? ' · ' + fmt(t.v, 1) + ' mph' : ''}${t.pt ? ' · ' + esc(t.pt) : ''}</title><line x1="${cx}" x2="${cx}" y1="${y(0)}" y2="${y(pc)}" stroke="var(--line)" stroke-width="1.1"/><circle cx="${cx}" cy="${y(pc)}" r="3.2" fill="${c}"/></g>`; });
+    x0 += w + GAP; });
+  const defs = `<defs>${['plyo_wu', 'plyo_hi'].map(k => `<pattern id="tlh-${k}" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--c-${k})" fill-opacity=".18"/><line x1="0" y1="0" x2="0" y2="6" stroke="var(--c-${k})" stroke-width="2"/></pattern>`).join('')}</defs>`;
+  ch.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Throw timeline for ${tlLong(d)}">${defs}${out}</svg>`;
+  // table
+  const rows = []; acts.forEach((a, ai) => {
+    const vs = a.th.filter(t => t.v && !t.wu).map(t => t.v), warm = a.th.filter(t => t.wu).length, main = a.th.length - warm;
+    const restCell = ai ? `<td class="${a.short ? 'bad' : a.rule ? 'ok' : ''}">${tlDur(a.rest)}${a.short ? ' ⚠' : ''}</td><td>${a.rule ? a.rule.min + ' min' : '–'}</td>` : '<td>–</td><td>–</td>';
+    rows.push(`<tr><td><i class="swatch" style="background:${col(a.k === 'cp' ? 'cp' : a.k === 'mound' ? 'mp' : a.k === 'gbullpen' ? 'gbp' : a.k === 'game' ? 'gp' : a.k)}"></i> <b>${esc(a.label)}</b></td><td>${tlHM(a.start)}</td><td>${tlHM(a.end)}</td><td>${tlDur(a.end - a.start)}</td><td class="n">${a.typed ? (a.plyoN || '–') : warm ? `${warm} + ${main}` : main}</td><td class="n">${vs.length ? fmt(Math.max(...vs), 1) : '–'}</td>${restCell}<td></td></tr>`);
+    if (a.innings) a.innings.forEach(g => rows.push(`<tr class="inn"><td>Inning ${g.n}</td><td>${tlHM(g.start)}</td><td>${tlHM(g.end)}</td><td>${tlDur(g.end - g.start)}</td><td class="n">${g.warm} + ${g.pitches}</td><td class="n">${g.vlo !== null ? `${fmt(g.vlo, 1)}–${fmt(g.vhi, 1)}${g.fbOnly ? ' FB' : ''}` : '–'}</td><td>${g.rest !== null ? tlDur(g.rest) : '–'}</td><td></td><td class="n">${g.tempo !== null ? fmt(g.tempo, 1) + 's' : '–'}</td></tr>`));
+  });
+  document.getElementById('tl-table').innerHTML = `<thead><tr><th>Activity</th><th>Start</th><th>End</th><th>Length</th><th class="n">Throws (warm-up + main)</th><th class="n">Top mph (innings: range)</th><th>Rest before</th><th>Minimum</th><th class="n">Tempo</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  tlPlyoBox(d, B_);
+  const rules = REST_RULES.filter(r => r.role === (S.role || 'starter') || r.role === 'all');
+  note.innerHTML = `Rest = time from the last throw of one activity to the first throw of the next; for innings it is the recovery since the previous inning's last pitch. Tempo = average seconds between pitches. ${rules.length ? `Minimums for a ${esc(S.role || 'starter')} (Master → RestRules): ${rules.map(r => `${TL_GROUPS[r.from]} → ${TL_GROUPS[r.to]} ${r.min} min`).join(' · ')}.` : `No minimum rest set for a ${esc(S.role || 'starter')} yet (Master → RestRules).`}${B_.untimed ? ` ${B_.untimed} throws this day have no full time (old sheets) and are not on the timeline.` : ''}`;
+}
+function tlPlyoBox(d, B_) {
+  const box = document.getElementById('tl-plyo'); const hm = v => s_(v).slice(0, 5);
+  box.innerHTML = `<b>Plyo times</b>` + ['plyo_wu', 'plyo_hi'].map(k => { const r = ACT_TIMES.get(d + '|' + k) || {}; return `<span>${TL_LABEL[k]}${B_.plyoCounts[k] ? ` (${B_.plyoCounts[k]})` : ''}: <input type="time" data-tls="${k}" value="${hm(r.start)}" aria-label="${TL_LABEL[k]} start"> to <input type="time" data-tle="${k}" value="${hm(r.end)}" aria-label="${TL_LABEL[k]} end"> <button type="button" data-tlsave="${k}">Save</button></span>`; }).join('') + `<span class="muted">Clear the start time and save to remove.</span>`;
+}
+
 function dayTip(d, s, e) {
   const rows0 = GROUPS.filter(g => s.r.g[g.id] && s.r.g[g.id].n).map(g => { const gg = s.r.g[g.id]; const est = s.planned || s.r.sr ? '' : gg.estN ? ` <span style="opacity:.75">(${gg.estN === gg.n ? 'all' : gg.estN} est.)</span>` : ''; return `<tr><td><i class="sw" style="background:${g.color}"></i>${g.label}</td><td style="text-align:right">${fmt(gg.wl + gg.est)}</td><td style="text-align:right">${gg.n}${est}</td></tr>`; }).join('');
   const note = (teamNote(d) ? `<div class="tip-tnote">📌 ${esc(teamNote(d))}</div>` : '') + ((S.b && S.b.draft[d] && S.b.draft[d].note) ? `<div class="tip-note">📝 ${esc(S.b.draft[d].note)}</div>` : '');
@@ -1345,7 +1473,7 @@ function drawDaily(dates, sel, o = {}) {
     if (labelMode === 'flat') labels += `<text class="barval" x="${cx}" y="${top - 4}" text-anchor="middle">${fmt(s.r.wl)}</text>`;
     if (labelMode === 'tight') { const v = s.r.wl, txt = v >= 1000 ? (v >= 9950 ? Math.round(v / 1000) : (v / 1000).toFixed(1)) + 'k' : fmt(v); const fs = Math.min(9.5, bw * 0.98 / (txt.length * 0.56)); labels += `<text class="barval" x="${cx}" y="${top - 4}" text-anchor="middle" style="font-size:${fs.toFixed(1)}px">${txt}</text>`; }
     const e = ew.get(d);
-    bars += `<g data-tip="${esc(dayTip(d, s, e))}">${parts.join('')}<rect x="${x(d)}" y="${m.t}" width="${bw}" height="${H - m.t - m.b}" fill="transparent"/></g>`;
+    bars += `<g data-d="${d}" style="cursor:pointer" data-tip="${esc(dayTip(d, s, e))}">${parts.join('')}<rect x="${x(d)}" y="${m.t}" width="${bw}" height="${H - m.t - m.b}" fill="transparent"/></g>`;
   }
   const noteMarks = dates.filter(d => S.b && S.b.draft[d] && S.b.draft[d].note).map(d => `<g><title>${esc(S.b.draft[d].note)}</title><rect x="${(x(d) + bw * 0.15).toFixed(1)}" y="${H - m.b + 1}" width="${Math.max(2, bw * 0.7).toFixed(1)}" height="4" rx="1" fill="#ffc000"/></g>`).join('');
   const [rlo, rhi] = acRange();
@@ -2798,7 +2926,7 @@ async function connectSchedule() {
 // Day types, colours, throw labels and bases, intensity, plyo balls and drills are read from "Pitcher Workload - Master".
 // The lists built into this page stay in use until the sheet loads, and whenever it can't be reached.
 const MASTER_ID = '1q-19tgNio36KSs6TppjbFtFIrYtflV6vNm3viaJNMp4';
-const MASTER_TABS = {Seasons: 'A2:G', KeyDates: 'A2:C', Pitchers: 'A2:H', ThrowTypes: 'A2:F', ThrowDetails: 'A2:G', DayTypes: 'A2:F', Intensity: 'A2:C', PlyoBalls: 'A2:D', PlyoDrills: 'A2:B', DayBlueprints: 'A2:O', VelocityBands: 'A2:E', AppSettings: 'A2:C'};
+const MASTER_TABS = {RestRules: 'A2:E', Seasons: 'A2:G', KeyDates: 'A2:C', Pitchers: 'A2:H', ThrowTypes: 'A2:F', ThrowDetails: 'A2:G', DayTypes: 'A2:F', Intensity: 'A2:C', PlyoBalls: 'A2:D', PlyoDrills: 'A2:B', DayBlueprints: 'A2:O', VelocityBands: 'A2:E', AppSettings: 'A2:C'};
 const MASTER_PITCHER = LIVE_SITE ? {} : {will: 'P001', test1: 'P900'}; // prototype pitcher -> Master pitcher_id
 const localIdFor = pid => Object.keys(MASTER_PITCHER).find(k => MASTER_PITCHER[k] === pid) || pid;
 let MASTER_MAX = null, maxTouched = false;
@@ -2857,6 +2985,7 @@ function applyMaster() {
       if (band) { if (s_(r[3]) !== '' && !isNaN(+r[3])) band[2] = +r[3]; if (s_(r[2]) && (c === 'cp' || c === 'mp')) band[1] = s_(r[2]); }
     });
     reset(BAND_BASE, BANDS.map(b => [b[0], b[2]])); reset(BAND_LABEL, BANDS.map(b => [b[0], b[1]])); used.push('ThrowDetails'); } }
+  if (R.RestRules) { REST_RULES = R.RestRules.filter(r => s_(r[1]) && s_(r[2]) && s_(r[3]) !== '').map(r => ({role: s_(r[0]).toLowerCase() || 'all', from: tlGroupKey(r[1]), to: tlGroupKey(r[2]), min: parseFloat(s_(r[3])), note: s_(r[4])})).filter(r => r.from && r.to && r.min >= 0); used.push('RestRules'); if (S.view === 'explore') tlDraw(); }
   if (R.AppSettings) { const kv = Object.fromEntries(R.AppSettings.filter(r => s_(r[0])).map(r => [s_(r[0]).toLowerCase(), s_(r[1]).toLowerCase()]));
     const m = kv.acwr_start === 'sheet' ? 'sheet' : kv.acwr_start === 'early' ? 'early' : null;
     if (m) { TEAM_ACMODE = m; if (LIVE_SITE && S.acMode !== m) { S.acMode = m; B.flagsKnown = null; } applyAcMode(); used.push('AppSettings'); } }
@@ -3214,6 +3343,7 @@ async function connectStore() {
     schedule = new Map(snap.docs.filter(d => d.exists && d.data().label).map(d => [d.id, String(d.data().label)]));
     if (S.view === 'explore') renderExplore();
   }, () => {});
+  try { db.collection(col('activityTimes')).onSnapshot(snap => { ACT_TIMES = new Map(snap.docs.filter(d => d.exists).map(d => [d.id, d.data()])); if (S.view === 'explore') tlDraw(); }, () => {}); } catch (e) {}
   db.collection(col('modeTargets')).onSnapshot(snap => {
     modeTargets = snap.docs.filter(d => d.exists).map(d => ({id: d.id, ...d.data()})).filter(t => t.cat && t.from && typeof t.mph === 'number');
     if (S.view === 'explore') { const lo = S.ex.from <= S.ex.to ? S.ex.from : S.ex.to, hi = S.ex.from <= S.ex.to ? S.ex.to : S.ex.from; drawMode(dateRange(lo, hi)); } else renderTargets();
