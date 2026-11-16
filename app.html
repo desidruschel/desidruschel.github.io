@@ -696,7 +696,7 @@ body.live .pv-preview { display: none; }
   <section class="view" id="view-data" hidden>
     <div class="panel">
       <div class="panel-head"><h2>Upload device files</h2><span class="dsub">Pocket Radar, Trackman bullpen and game files · CSV or Excel · any number of pitchers per file</span></div>
-      <p class="lead">Each row goes to the pitcher named on it. Throws already saved are never added twice, so uploading the same file again is safe. Names that don't match a pitcher are listed; add them to the Master's <b>PitcherAliases</b> tab and upload again.</p>
+      <p class="lead">Each row goes to the pitcher named on it. Throws already saved are never added twice, so uploading the same file again is safe. If a saved throw has no clock time (the old sheets kept only minutes:seconds), the upload fills in its full time. Names that don't match a pitcher are listed; add them to the Master's <b>PitcherAliases</b> tab and upload again.</p>
       <label class="dropzone" id="up-drop"><input type="file" id="up-files" multiple accept=".csv,.txt,.xlsx,.xls"><span>Choose files, or drag them here</span></label>
       <div id="up-result" class="upres" aria-live="polite"></div>
     </div>
@@ -3723,7 +3723,7 @@ async function upPick(fileList) {
 const KIND_LABEL = {pocket: 'Pocket Radar', trackman: 'Trackman bullpen', game: 'Game file'};
 function upShow(r, done) {
   const box = document.getElementById('up-result'); const names = o => Object.entries(o || {}).map(([n, c]) => `${esc(n)} (${c})`).join(', ');
-  const fr = r.files.map(f => `<tr><td>${esc(f.name)}<div class="dsub">${f.kind ? KIND_LABEL[f.kind] + (f.live ? ' · live BP / sim' : '') : '<span class="warn">' + esc(f.note || 'Not recognised') + '</span>'}</div></td><td class="num">${f.rows}</td><td class="num"><b>${f.added}</b></td><td class="num">${f.dup}</td><td class="num">${f.skipped + f.outside}</td>
+  const fr = r.files.map(f => `<tr><td>${esc(f.name)}<div class="dsub">${f.kind ? KIND_LABEL[f.kind] + (f.live ? ' · live BP / sim' : '') : '<span class="warn">' + esc(f.note || 'Not recognised') + '</span>'}</div></td><td class="num">${f.rows}</td><td class="num"><b>${f.added}</b></td><td class="num">${f.dup}${f.timed ? `<div class="dsub">${f.timed} get their missing time${done ? '' : ' on save'}</div>` : ''}</td><td class="num">${f.skipped + f.outside}</td>
     <td>${f.ignored ? `<div class="dsub">${f.ignored} row${f.ignored === 1 ? '' : 's'} for names set to IGNORE</div>` : ''}${Object.keys(f.unmatched).length ? `<span class="warn">Not matched: ${names(f.unmatched)}</span>` : ''}${Object.keys(f.notYours).length ? `<div class="warn">Not on your roster: ${names(f.notYours)}</div>` : ''}</td></tr>`).join('');
   const pr = Object.values(r.pitchers).sort((a, b) => a.name.localeCompare(b.name)).map(p => `<li><b>${esc(p.name)}</b>: ${p.added} throw${p.added === 1 ? '' : 's'} on ${p.days.length} day${p.days.length === 1 ? '' : 's'} (${p.days.length > 3 ? `${nice(p.days[0])} – ${nice(p.days[p.days.length - 1])}` : p.days.map(nice).join(', ')})</li>`).join('');
   box.innerHTML = `<table><thead><tr><th>File</th><th class="num">Rows</th><th class="num">${done ? 'Added' : 'To add'}</th><th class="num">Already saved</th><th class="num">Skipped</th><th></th></tr></thead><tbody>${fr}</tbody></table>
